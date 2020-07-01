@@ -1,40 +1,37 @@
-import { NazelJson, isRepoDependency, BuildNode, BuildDependency, IDependency, NpmDependencyNode } from "./build-graph.ts";
-import { topologicalSort } from "./toposort.ts";
+import * as log from 'https://deno.land/std@0.56.0/log/mod.ts';
+import * as path from 'https://deno.land/std@0.56.0/path/mod.ts';
+import { NazelJson, BuildWorkspace, BuildGraph } from "./build-graph.ts";
 
-export async function build() {
+export interface BuildOptions {
+  readonly concurrency?: number;
+  readonly targets?: string[];
+}
+
+export async function build(options: BuildOptions = {}) {
   const nazelJson: NazelJson = JSON.parse(await Deno.readTextFile('nazel.json'));
 
-  const unitDefinitions = new Map(nazelJson.units.map(unit => [unit.identifier, unit]));
-  const orderedDefinitions = topologicalSort(unitDefinitions.values(),
-    u => u.identifier,
-    u => u.dependencies?.filter(isRepoDependency).map(d => d.identifier) ?? []);
+  const graph = new BuildGraph(nazelJson.units);
 
-  const nodeMap = new Map<string, BuildNode>();
-  const nodes = new Array<BuildNode>();
-  for (const def of orderedDefinitions) {
-    const node = await BuildNode.fromDefinition(def, def.dependencies?.map(dependencyObject) ?? []);
-    nodes.push(node);
-    nodeMap.set(node.identifier, node);
-  }
+  await graph.build();
+  const workspace = new BuildWorkspace(path.resolve(Deno.dir('home') ?? '.', '.nazel-build'));
 
-  const root = Deno.cwd();
+  const queue = (options.targets ?? []).length > 0 ? graph.queueFor(options.targets!) : graph.queue();
+  await queue.writeGraphViz('build.dot');
+  log.info(`${queue.size} nodes to build`);
 
-  for (const node of nodes) {
-    await node.build(root);
-  }
+  await queue.parallel(options.concurrency || 4, async (node) => {
+    const hash = `${node.slug}-${await node.sourceHash()}`;
 
-  function dependencyObject(dep: BuildDependency): IDependency {
-    switch (dep.type) {
-      case 'repo':
-        const x = nodeMap.get(dep.identifier);
-        if (x === undefined) { throw new Error(`Dependency problem with ${dep.identifier}`); }
-        return x;
-
-      case 'npm':
-        return new NpmDependencyNode(dep);
-
-      default:
-        throw new Error(`Unknown dependency type: ${JSON.stringify(dep)}`);
+    let built = await workspace.fromCache(hash);
+    if (built) {
+      log.debug(`From cache: ${node.identifier} (${built.root})`);
+    } else {
+      const env = await workspace.makeBuildEnvironment(node.slug);
+      await node.build(env);
+      built = await workspace.store(env, hash);
     }
-  }
+
+    // Need to load this for outHashes
+    await node.rememberOutput(built);
+  });
 }

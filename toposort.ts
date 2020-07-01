@@ -1,5 +1,5 @@
-export type KeyFunc<T> = (x: T) => string;
-export type DepFunc<T> = (x: T) => string[];
+export type KeyFunc<T, U> = (x: T) => U;
+export type DepFunc<T, U> = (x: T) => U[];
 
 /**
  * Return a topological sort of all elements of xs, according to the given dependency functions
@@ -9,8 +9,8 @@ export type DepFunc<T> = (x: T) => string[];
  * Not a stable sort, but in order to keep the order as stable as possible, we'll sort by key
  * among elements of equal precedence.
  */
-export function topologicalSort<T>(xs: Iterable<T>, keyFn: KeyFunc<T>, depFn: DepFunc<T>): T[] {
-  const remaining = new Map<string, TopoElement<T>>();
+export function topologicalSort<T, U=string>(xs: Iterable<T>, keyFn: KeyFunc<T, U>, depFn: DepFunc<T, U>): T[] {
+  const remaining = new Map<U, TopoElement<T, U>>();
   for (const element of xs) {
     const key = keyFn(element);
     remaining.set(key, { key, element, dependencies: depFn(element) });
@@ -37,8 +37,8 @@ export function topologicalSort<T>(xs: Iterable<T>, keyFn: KeyFunc<T>, depFn: De
   return ret;
 }
 
-interface TopoElement<T> {
-  key: string;
-  dependencies: string[];
+interface TopoElement<T, U> {
+  key: U;
+  dependencies: U[];
   element: T;
 }

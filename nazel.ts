@@ -20,19 +20,39 @@
  * - Only needs to deal with Yarn as an actual version fetcher.
  */
 import { parse } from 'https://deno.land/std@0.56.0/flags/mod.ts';
+import * as log from 'https://deno.land/std@0.56.0/log/mod.ts';
 
 import { fromLerna } from './from-lerna.ts';
 import { build } from './build.ts';
 
 async function main() {
-  const args = parse(Deno.args);
+  const args = parse(Deno.args, {
+    boolean: ['verbose', 'v'],
+  });
+
+  const level = args.verbose || args.v ? 'DEBUG' : 'INFO';
+
+  await log.setup({
+    handlers: {
+      default: new log.handlers.ConsoleHandler(level),
+    },
+    loggers: {
+      default: {
+        level: level,
+        handlers: ['default'],
+      },
+    },
+  });
 
   switch (args._[0]) {
     case 'from-lerna':
       return await fromLerna();
 
     case 'build':
-      return await build();
+      return await build({
+        concurrency: args.concurrency ?? args.c,
+        targets: args._.slice(1).map(x => `${x}`)
+      });
 
     default:
       throw new Error(`Unknown command: ${args._}`);

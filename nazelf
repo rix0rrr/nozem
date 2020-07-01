@@ -1,0 +1,4 @@
+#!/bin/bash
+set -eu
+scriptdir=$(cd $(dirname $0) && pwd)
+deno run --allow-read --allow-write --unstable $scriptdir/nazel.ts from-lerna
