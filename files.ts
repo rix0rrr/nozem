@@ -1,3 +1,4 @@
+import * as fs from 'https://deno.land/std@0.56.0/fs/mod.ts';
 import * as log from 'https://deno.land/std@0.56.0/log/mod.ts';
 import * as path from 'https://deno.land/std@0.56.0/path/mod.ts';
 import { Sha1 as Digest } from 'https://deno.land/std/hash/sha1.ts';
@@ -29,15 +30,20 @@ export class FileSet {
     }
   }
 
+  public async copyTo(targetDir: string) {
+    return promiseAllBatch(8, this.files.map((f) => () => copy(
+        path.join(this.root, f),
+        path.join(targetDir, f))));
+  }
+
   public async hash() {
     if (this._hash === undefined) {
       const start = Date.now();
 
       const d = new Digest();
 
-      /**
        // error: Uncaught Error: Too many open files (os error 24)
-      d.update((await Promise.all(this.files.map(async (file) => {
+      d.update((await promiseAllBatch(8, this.files.map((file) => async () => {
         const fullPath = path.join(this.root, file);
         if ((await Deno.lstat(fullPath)).isSymlink) {
           return `${file}\n${await Deno.readLink(fullPath)}\n`;
@@ -45,8 +51,8 @@ export class FileSet {
           return `${file}\n${await Deno.readFile(fullPath)}\n`;
         }
       }))).join(''));
-      */
 
+      /*
       for (const file of this.files) {
         d.update(file);
         d.update('\n');
@@ -59,6 +65,7 @@ export class FileSet {
         }
         d.update('\n');
       }
+      */
 
       const delta = (Date.now() - start) / 1000;
       if (delta > 2) {
@@ -186,4 +193,70 @@ export class FilePatterns {
     }
     return ret;
   }
+}
+
+export async function copy(src: string, target: string) {
+  await fs.ensureDir(path.dirname(target));
+  let errorMessage = `Error copying ${src} -> ${target}`;
+  try {
+    const stat = await Deno.lstat(src);
+    if (stat.isSymlink) {
+      const linkTarget = await Deno.readLink(src);
+      errorMessage = `Error copying symlink ${src} (${linkTarget}) -> ${target}`;
+      if (await fs.exists(target)) {
+        await Deno.remove(target);
+      }
+      await Deno.symlink(linkTarget, target);
+    } else {
+      await fs.copy(src, target, { preserveTimestamps: true, overwrite: true });
+    }
+  } catch (e) {
+    console.error(errorMessage);
+    throw e;
+  }
+}
+
+/**
+ * Resolve a number of promises concurrently
+ *
+ * Some concurrency is good but too much concurrency actually breaks
+ * (copying ~4k files concurrently completely locks up my machine).
+ *
+ * Control the concurrency.
+ */
+async function promiseAllBatch<A>(n: number, thunks: Array<() => Promise<A>>): Promise<A[]> {
+  const ret: A[] = [];
+
+  let active = 0;
+  let next = 0;
+  let failed = false;
+  return new Promise((ok, ko) => {
+    function launchMore() {
+      if (failed) { return; }
+
+      // If there's no work left to do and nothing in progress, we're done
+      if (next === thunks.length && active === 0) {
+        ok(ret);
+      }
+
+      // Launch as many parallel "threads" as we can
+      while (active < n && next < thunks.length) {
+        const index = next++;
+        active++;
+
+        thunks[index]().then(result => {
+          active--;
+          ret[index] = result;
+          launchMore();
+        }).catch(fail);
+      }
+    }
+
+    function fail(e: Error) {
+      failed = true;
+      ko(e);
+    }
+
+    launchMore();
+  });
 }

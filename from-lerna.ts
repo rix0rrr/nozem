@@ -61,7 +61,9 @@ export class MonoRepoAnalyzer {
         executables: d.dependencyType === 'dev' || !tsApiOptimization ? true : false,
       }) as LinkNpmDependency),
       ...dependencies.externalDependencies
-    ];
+    ]
+    // Replace 'pkglint' dependency with a fake pkglint dependency
+    .map(d => d.type === 'link-npm' && d.node === 'pkglint' ? { type: 'os', executable: 'true', rename: 'pkglint' } as OsDependency : d);
 
     const runtimeDependencies = [
       ...dependencies.repoDependencies.map(d => ({
@@ -103,7 +105,7 @@ export class MonoRepoAnalyzer {
       ],
       dependencies: [
         { type: 'copy', node: `${packageJson.name}:build` },
-        ...runtimeDependencies,
+        ...buildDependencies,
       ],
     });
 
@@ -130,15 +132,10 @@ export class MonoRepoAnalyzer {
       buildCommand: packageJson.scripts?.test ?? 'true',
       root,
       nonArtifacts: ['**/*'],
-      // Copy in everything because there might be data files and we can't know which ones they are.
-      // Except TS/JS-related files, those should come from the build itself.
-      nonSources: packageJson.nzl$copyAllSourcesForTest ? [
-        '/node_modules/',
-      ] : [
-        '**/*.ts',
-        '**/*.js',
-        '/node_modules/',
-      ],
+      // Copy in all source files because there might be data files and we can't know which ones they are.
+      // There might be .js files in there that are not considered build output, we should copy those as well,
+      // hence we need to respect the .gitignores.
+      nonSources,
       dependencies: [
         { type: 'copy', node: packageJson.name },
         ...runtimeDependencies,

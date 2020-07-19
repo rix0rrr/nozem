@@ -3,7 +3,7 @@ import * as fs from 'https://deno.land/std@0.56.0/fs/mod.ts';
 import * as log from 'https://deno.land/std@0.56.0/log/mod.ts';
 import { Sha1 as Digest } from 'https://deno.land/std/hash/sha1.ts';
 import { PackageJson, TsconfigJson } from './file-schemas.ts';
-import { FileSet, walkFiles, FileMatcher, FilePatterns } from './files.ts';
+import { FileSet, walkFiles, FileMatcher, FilePatterns, copy } from './files.ts';
 import { Graph } from './graph.ts';
 
 export interface NazelJson {
@@ -218,12 +218,12 @@ export type BuildDependency = NpmDependency | LinkNpmDependency | OsDependency |
 export type NpmDependency = { type: 'npm'; name: string; versionRange: string; resolvedLocation: string };
 export type LinkNpmDependency = { type: 'link-npm'; node: string; executables: boolean };
 export type CopyDependency = { type: 'copy'; node: string; subdir?: string };
-export type OsDependency = { type: 'os'; executable: string };
+export type OsDependency = { type: 'os'; executable: string; rename?: string };
 
 export function buildDependencyId(dep: BuildDependency): string {
   switch (dep.type) {
     case 'npm': return `npm:${dep.name}:${dep.resolvedLocation}`;
-    case 'os': return `os:${dep.executable}`;
+    case 'os': return `os:${dep.executable}` + (dep.rename ? `:${dep.rename}` : '');
     case 'link-npm': return `link-npm:${dep.node}:${dep.executables}`;
     case 'copy': return `copy:${dep.node}:${dep.subdir ?? ''}`;
   }
@@ -347,7 +347,7 @@ export class ExtractNode extends NodeBase {
   }
 
   public async build(env: BuildEnvironment): Promise<void> {
-    log.info(`Extract ${this.identifier}`);
+    log.debug(`Extract ${this.identifier}`);
 
     for (const dep of this.dependencies) {
       await dep.installInto(env);
@@ -382,10 +382,12 @@ export class BuildNode extends NodeBase {
     await env.addSrcFiles(this.files);
 
     for (const dep of this.dependencies) {
+      // log.debug(`Installing dep ${dep.description}`);
       await dep.installInto(env);
     }
 
     if (this.def.patchTsconfig) {
+      // log.debug(`Patching tsconfig in ${env.srcDir}`);
       await this.patchTsConfig(path.join(env.srcDir, 'tsconfig.json'));
     }
 
@@ -595,7 +597,7 @@ export class OsDependencyNode implements IDependency {
     const location = new TextDecoder().decode(await p.output()).trim();
     p.close();
 
-    await env.installExecutable(location);
+    await env.installExecutable(location, this.def.rename);
   }
 }
 
@@ -652,7 +654,7 @@ export class BuildEnvironment {
   public readonly srcDir: string;
   public readonly outDir: string;
   private _outFiles?: FileSet;
-  private _outHash?: string;
+  private _outHash?: Promise<string>;
   private derivationCache = new Map<string, FileSet>();
 
   constructor(public readonly workspace: BuildWorkspace, public readonly root: string) {
@@ -668,16 +670,20 @@ export class BuildEnvironment {
     return this._outFiles;
   }
 
-  public async outHash(): Promise<string> {
+  public outHash(): Promise<string> {
+    // Cache the promise, not the value, so that we don't start the computation twice.
     if (this._outHash === undefined) {
-      // Cache this in file, saves recalculation
-      const cacheFile = path.join(this.root, 'out.hash');
-      if (await fs.exists(cacheFile)) {
-        this._outHash = await Deno.readTextFile(cacheFile);
-      } else {
-        this._outHash = await (await this.outFiles()).hash();
-        await Deno.writeTextFile(cacheFile, this._outHash);
-      }
+      this._outHash = (async () => {
+        // Cache this in file, saves recalculation
+        const cacheFile = path.join(this.root, 'out.hash');
+        if (await fs.exists(cacheFile)) {
+          return await Deno.readTextFile(cacheFile);
+        } else {
+          const h = await (await this.outFiles()).hash();
+          await Deno.writeTextFile(cacheFile, h);
+          return h;
+        }
+      })();
     }
     return this._outHash;
   }
@@ -709,23 +715,19 @@ export class BuildEnvironment {
   }
 
   public async addSrcFiles(files: FileSet, subdir: string = '.') {
-    await Promise.all(files.files.map(f => this.addSrcFile(files.absPath(f), path.join(subdir, f))));
+    return files.copyTo(path.join(this.srcDir, subdir));
   }
 
   public async addSrcFile(absSource: string, relTarget: string) {
     const absTarget = path.join(this.srcDir, relTarget);
-    await this.copy(absSource, absTarget);
+    await copy(absSource, absTarget);
   }
 
   public async copySrcToOut(matcher: FileMatcher) {
     // We did an in-source build. Copy everything except the non-artifact
     // files to the output directory.
     const artifacts = await FileSet.fromFileSystem(this.srcDir, matcher);
-    for (const f of artifacts.files) {
-      await this.copy(
-        path.join(this.srcDir, f),
-        path.join(this.outDir, f));
-    }
+    return artifacts.copyTo(this.outDir);
   }
 
   public async deriveOutput(patterns: FilePatterns) {
@@ -736,11 +738,7 @@ export class BuildEnvironment {
       const tmpDir = await Deno.makeTempDir({ dir: this.root, prefix: 'tmp_deriv' });
 
       const derivedFiles = await FileSet.fromFileSystem(this.outDir, patterns.toIncludeMatcher());
-      for (const f of derivedFiles.files) {
-        await this.copy(
-          path.join(this.outDir, f),
-          path.join(tmpDir, f));
-      }
+      await derivedFiles.copyTo(tmpDir);
 
       try {
         await Deno.rename(tmpDir, derivationDir);
@@ -803,26 +801,6 @@ export class BuildEnvironment {
     }
   }
 
-  private async copy(src: string, target: string) {
-    await fs.ensureDir(path.dirname(target));
-    let errorMessage = `Error copying ${src} -> ${target}`;
-    try {
-      const stat = await Deno.lstat(src);
-      if (stat.isSymlink) {
-        const linkTarget = await Deno.readLink(src);
-        errorMessage = `Error copying symlink ${src} (${linkTarget}) -> ${target}`;
-        if (await fs.exists(target)) {
-          await Deno.remove(target);
-        }
-        await Deno.symlink(linkTarget, target);
-      } else {
-        await fs.copy(src, target, { preserveTimestamps: true, overwrite: true });
-      }
-    } catch (e) {
-      console.error(errorMessage);
-      throw e;
-    }
-  }
 }
 
 async function readJson(filename: string) {

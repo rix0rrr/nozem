@@ -1,4 +1,4 @@
 #!/bin/bash
 set -eu
 scriptdir=$(cd $(dirname $0) && pwd)
-deno run --inspect --allow-all --unstable $scriptdir/nazel.ts build "$@"
+deno run --allow-all --unstable $scriptdir/nazel.ts build "$@"
