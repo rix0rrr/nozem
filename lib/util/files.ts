@@ -1,23 +1,31 @@
-import * as fs from 'https://deno.land/std@0.56.0/fs/mod.ts';
-import * as log from 'https://deno.land/std@0.56.0/log/mod.ts';
-import * as path from 'https://deno.land/std@0.56.0/path/mod.ts';
-import { Sha1 as Digest } from 'https://deno.land/std/hash/sha1.ts';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
+import * as log from './log';
+import { cachedPromise, escapeRegExp } from './runtime';
 
+const hashSym = Symbol();
+
+/**
+ * A set of files, relative to a directory
+ */
 export class FileSet {
-  public static async fromFileSystem(root: string, matcher: FileMatcher) {
+  public static async fromMatcher(root: string, matcher: FileMatcher) {
     const files = new Array<string>();
     await walkFiles(root, matcher, async (f) => { files.push(f); });
     return new FileSet(root, files);
   }
 
   public static async fromDirectory(root: string) {
-    return FileSet.fromFileSystem(root, ALL_FILES_MATCHER);
+    return FileSet.fromMatcher(root, ALL_FILES_MATCHER);
   }
 
-  private _hash?: string;
+  constructor(public readonly root: string, public readonly fileNames: string[]) {
+    this.fileNames.sort();
+  }
 
-  constructor(public readonly root: string, public readonly files: string[]) {
-    this.files.sort();
+  public get fullPaths() {
+    return this.fileNames.map(f => this.absPath(f));
   }
 
   public absPath(f: string) {
@@ -25,58 +33,47 @@ export class FileSet {
   }
 
   public print() {
-    for (const f of this.files) {
+    for (const f of this.fileNames) {
       console.log(f);
     }
   }
 
   public async copyTo(targetDir: string) {
-    return promiseAllBatch(8, this.files.map((f) => () => copy(
+    return promiseAllBatch(8, this.fileNames.map((f) => () => copy(
         path.join(this.root, f),
         path.join(targetDir, f))));
   }
 
   public async hash() {
-    if (this._hash === undefined) {
+    return cachedPromise(this, hashSym, async () => {
       const start = Date.now();
 
-      const d = new Digest();
+      const d = standardHash();
 
-       // error: Uncaught Error: Too many open files (os error 24)
-      d.update((await promiseAllBatch(8, this.files.map((file) => async () => {
+      // error: Uncaught Error: Too many open files (os error 24)
+      d.update((await promiseAllBatch(8, this.fileNames.map((file) => async () => {
         const fullPath = path.join(this.root, file);
-        if ((await Deno.lstat(fullPath)).isSymlink) {
-          return `${file}\n${await Deno.readLink(fullPath)}\n`;
-        } else {
-          return `${file}\n${await Deno.readFile(fullPath)}\n`;
-        }
+        return `${file}\n${fileHash(fullPath)}\n`;
       }))).join(''));
-
-      /*
-      for (const file of this.files) {
-        d.update(file);
-        d.update('\n');
-
-        const fullPath = path.join(this.root, file);
-        if ((await Deno.lstat(fullPath)).isSymlink) {
-          d.update(await Deno.readLink(fullPath));
-        } else {
-          d.update(await Deno.readFile(fullPath));
-        }
-        d.update('\n');
-      }
-      */
 
       const delta = (Date.now() - start) / 1000;
       if (delta > 2) {
-        log.warning(`Hashing ${this.root} (${this.files.length} files) took ${delta.toFixed(1)}s`);
+        log.warning(`Hashing ${this.root} (${this.fileNames.length} files) took ${delta.toFixed(1)}s`);
       }
 
-      this._hash = d.hex();
-    }
-
-    return this._hash;
+      return d.digest('hex');
+    });
   }
+}
+
+async function fileHash(fullPath: string) {
+  const hash = standardHash();
+  if ((await fs.lstat(fullPath)).isSymbolicLink()) {
+    hash.update(await fs.readlink(fullPath));
+  } else {
+    hash.update(await fs.readFile(fullPath));
+  }
+  return hash.digest('hex');
 }
 
 export interface FileMatcher {
@@ -93,12 +90,12 @@ export async function walkFiles(root: string, matcher: FileMatcher, visitor: (cb
   const relPaths = ['.'];
   while (relPaths.length > 0) {
     const relPath = relPaths.pop()!;
-    for await (const child of Deno.readDir(path.join(root, relPath))) {
+    for await (const child of await fs.opendir(path.join(root, relPath))) {
       const relChildPath = path.join(relPath, child.name);
-      if (child.isDirectory && matcher.visitDirectory(relChildPath)) {
+      if (child.isDirectory() && matcher.visitDirectory(relChildPath)) {
         relPaths.push(relChildPath);
       }
-      if ((child.isFile || child.isSymlink) && matcher.visitFile(relChildPath)) {
+      if ((child.isFile() || child.isSymbolicLink()) && matcher.visitFile(relChildPath)) {
         await visitor(relChildPath);
       }
     }
@@ -141,10 +138,6 @@ function globToRegex(pattern: string) {
   return new RegExp(`^${regexParts.join('')}${dirSuffix}`);
 }
 
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
-}
-
 export class FilePatterns {
   private readonly regexes = new Array<{ neg: boolean, regex: RegExp }>();
   private _patternHash?: string;
@@ -160,11 +153,11 @@ export class FilePatterns {
 
   public patternHash() {
     if (!this._patternHash) {
-      const d = new Digest();
+      const d = standardHash();
       for (const file of this.patterns) {
         d.update(`${file}\n`);
       }
-      this._patternHash = d.hex();
+      this._patternHash = d.digest('hex');
     }
     return this._patternHash;
   }
@@ -176,7 +169,7 @@ export class FilePatterns {
     };
   }
 
-  public toIgnoreMatcher(): FileMatcher {
+  public toComplementaryMatcher(): FileMatcher {
     return {
       visitDirectory: (dirname) => !this.matches(dirname, true),
       visitFile: (filename) => !this.matches(filename, false),
@@ -196,22 +189,22 @@ export class FilePatterns {
 }
 
 export async function copy(src: string, target: string) {
-  await fs.ensureDir(path.dirname(target));
+  await fs.mkdir(path.dirname(target), { recursive: true });
   let errorMessage = `Error copying ${src} -> ${target}`;
   try {
-    const stat = await Deno.lstat(src);
-    if (stat.isSymlink) {
-      const linkTarget = await Deno.readLink(src);
+    const stat = await fs.lstat(src);
+    if (stat.isSymbolicLink()) {
+      const linkTarget = await fs.readlink(src);
       errorMessage = `Error copying symlink ${src} (${linkTarget}) -> ${target}`;
-      if (await fs.exists(target)) {
-        await Deno.remove(target);
+      if (await exists(target)) {
+        await fs.unlink(target);
       }
-      await Deno.symlink(linkTarget, target);
+      await fs.symlink(linkTarget, target);
     } else {
-      await fs.copy(src, target, { preserveTimestamps: true, overwrite: true });
+      await fs.copyFile(src, target);
     }
   } catch (e) {
-    console.error(errorMessage);
+    log.error(errorMessage);
     throw e;
   }
 }
@@ -258,5 +251,75 @@ async function promiseAllBatch<A>(n: number, thunks: Array<() => Promise<A>>): P
     }
 
     launchMore();
+  });
+}
+
+export function standardHash() {
+  return crypto.createHash('sha1');
+}
+
+export async function exists(s: string) {
+  try {
+    await fs.lstat(s);
+    return true;
+  } catch (e) {
+    if (e.code === 'ENOENT') { return false; }
+    throw e;
+  }
+}
+
+export async function rimraf(x: string) {
+  try {
+    const s = await fs.lstat(x);
+    if (s.isDirectory()) {
+      for (const child of await fs.readdir(x)) {
+        await rimraf(path.join(x, child));
+      }
+    } else {
+      await fs.unlink(x);
+    }
+  } catch (e) {
+    if (e.code === 'ENOENT') { return; }
+    throw e;
+  }
+}
+
+export async function ensureSymlink(target: string, filePath: string) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.symlink(target, filePath);
+}
+
+export async function readJson(filename: string) {
+  return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+}
+
+export async function writeJson(filename: string, obj: any) {
+  await fs.writeFile(filename, JSON.stringify(obj, undefined, 2), { encoding: 'utf-8' });
+}
+
+export function globMany(root: string, globs: string[]): Promise<FileSet> {
+  return FileSet.fromMatcher(root, new FilePatterns(['*/', ...globs]).toIncludeMatcher());
+}
+
+export async function ignoreEnoent(block: () => Promise<void>): Promise<void> {
+  try {
+    await block();
+  } catch (e) {
+    if (e.code !== 'ENOENT') { throw e; }
+  }
+}
+
+export async function removeOldSubDirectories(n: number, dirName: string) {
+  return ignoreEnoent(async () => {
+    const entries = await fs.readdir(dirName);
+    const es = await promiseAllBatch(8, entries.map((e) => async () => {
+      const fullPath = path.join(dirName, e);
+      return { fullPath, mtime: (await fs.lstat(fullPath)).mtimeMs };
+    }));
+    es.sort((a, b) => a.mtime - b.mtime);
+    while (es.length > n) {
+      const first = es.splice(0, 1)[0];
+      await rimraf(first.fullPath);
+    }
   });
 }

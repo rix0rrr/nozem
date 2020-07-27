@@ -1,4 +1,5 @@
-import { topologicalSort } from "./toposort.ts";
+import { topologicalSort } from "./toposort";
+import { promises as fs } from 'fs';
 
 
 /**
@@ -87,7 +88,7 @@ export class Graph<A> {
   }
 
   public async writeGraphViz(filename: string) {
-    await Deno.writeTextFile(filename, this.toGraphViz());
+    await fs.writeFile(filename, this.toGraphViz(), { encoding: 'utf-8' });
   }
 
   public toGraphViz(): string {

@@ -57,3 +57,42 @@ for packages that supply tools. For example: cfn2ts depends on cfnspec. It
 only needs to depend on the API to compile it, but it depends on the impl
 to RUN it.
 
+
+----------------------------------------------------------
+
+Build environment:
+
+- Build looks like:
+  * CACHEABLE
+    * copy source files in
+    * install dependencies
+    * run command
+    * move files into output directory
+  * annotate destination files
+  * extract derivations
+
+- Copy-back generated files to source directory can be structured as an
+  "extract" dependency and a no-op build.
+
+
+- BUILD ENV
+  some-directory/src/...
+                 node_modules/...
+                 bin/...
+
+- OUTDIR
+  package-dir/<src-hash>/out/...
+                         deriv/<id>/lib/...
+                                    node_modules/...
+                               "main" = special derivation?
+
+  package:lint
+  package:gen
+
+If we do directory symlinking, then node_modules directories relative to
+tsapi/runtime dependencies matter!
+
+- Cache environment (structured to make it easy to retain only N copies
+  per package).
+
+   directory-per-package/<hash>/...

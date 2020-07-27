@@ -1,9 +1,10 @@
-import * as path from 'https://deno.land/std@0.56.0/path/mod.ts';
-import * as fs from 'https://deno.land/std@0.56.0/fs/mod.ts';
-import * as log from 'https://deno.land/std@0.56.0/log/mod.ts';
+import * as path from 'path';
+import { promises as fs } from 'fs';
+import * as log from '../util/log';
 
-import { LernaJson, PackageJson } from './file-schemas.ts';
-import { UnitDefinition, BuildDependency, BuildScope, NazelJson, NpmDependency, LinkNpmDependency, OsDependency, buildDependencyId, IDependency, CopyDependency } from './build-graph.ts';
+import { PackageJson, LernaJson } from '../file-schemas';
+import { writeJson, readJson, exists, globMany } from '../util/files';
+import { UnitDefinition, NazelJson, InternalNpmDepSpec, NpmDepSpec, CopyDepSpec, BuildDepSpec, depSpecRepr, OsDepSpec } from '../nozem-schema';
 
 export async function fromLerna() {
   const analyzer = new MonoRepoAnalyzer();
@@ -31,27 +32,26 @@ export class MonoRepoAnalyzer {
       units: Array.from(this.units.values()),
     };
 
-    log.info('Writing nazel.json');
-    await Deno.writeTextFile('nazel.json', JSON.stringify(nazelFile, undefined, 2));
+    log.info('Writing nozem.json');
+    await writeJson('nozem.json', nazelFile);
   }
 
   private async findPackages() {
-    const lernaJson: LernaJson = JSON.parse(await Deno.readTextFile('lerna.json'));
-    for await (const entry of fs.walk(".", {
-      match: lernaJson.packages.map(s => path.globToRegExp(s + '/package.json')),
-    })) {
-      log.debug(entry.path);
-      const packageJson: PackageJson = JSON.parse(await Deno.readTextFile(entry.path));
-      this.packages.set(packageJson.name, { filename: entry.path, packageJson });
+    const lernaJson: LernaJson = await readJson('lerna.json');
+    const pjs = await globMany('.', lernaJson.packages.map(s => `/${s}/package.json`));
+    for (const p of pjs.fullPaths) {
+      log.debug(p);
+      const packageJson: PackageJson = await readJson(p);
+      this.packages.set(packageJson.name, { filename: p, packageJson });
     }
     log.info(`Found ${this.packages.size} packages`);
   }
 
   private async addBuildNodes(filename: string, packageJson: PackageJson) {
     log.info(`${filename}`);
-    const workspaceRoot = Deno.cwd();
+    const workspaceRoot = process.cwd();
     const root = path.dirname(filename);
-    const tsApiOptimization = !packageJson.nzl$skipTsApiOptimization;
+    const tsApiOptimization = !packageJson.nozem?.skipTsApiOptimization;
 
     const dependencies = await this.dependenciesFromPackageJson(workspaceRoot, root);
     const buildDependencies = [
@@ -59,18 +59,18 @@ export class MonoRepoAnalyzer {
         type: 'link-npm',
         node: d.dependencyType === 'dev' || !tsApiOptimization ? d.name : `${d.name}:tsapi`,
         executables: d.dependencyType === 'dev' || !tsApiOptimization ? true : false,
-      }) as LinkNpmDependency),
+      }) as InternalNpmDepSpec),
       ...dependencies.externalDependencies
     ]
     // Replace 'pkglint' dependency with a fake pkglint dependency
-    .map(d => d.type === 'link-npm' && d.node === 'pkglint' ? { type: 'os', executable: 'true', rename: 'pkglint' } as OsDependency : d);
+    .map(d => d.type === 'link-npm' && d.node === 'pkglint' ? { type: 'os', executable: 'true', rename: 'pkglint' } as OsDepSpec : d);
 
     const runtimeDependencies = [
       ...dependencies.repoDependencies.map(d => ({
         type: 'link-npm',
         node: d.name,
         executables: true,
-      }) as LinkNpmDependency),
+      }) as InternalNpmDepSpec),
       ...dependencies.externalDependencies
     ];
 
@@ -79,7 +79,7 @@ export class MonoRepoAnalyzer {
 
     // Build job
     this.addUnit({
-      type: 'build',
+      type: 'typescript-build',
       identifier: `${packageJson.name}:build`,
       root,
       buildCommand: packageJson.scripts?.build,
@@ -120,14 +120,14 @@ export class MonoRepoAnalyzer {
         { type: 'copy', node: `${packageJson.name}:build` },
         ...this.findNestedPackages(root).map(nested => ({
           type: 'copy', node: nested.packageJson.name, subdir: path.relative(root, path.dirname(nested.filename))
-        } as CopyDependency)),
+        } as CopyDepSpec)),
         ...runtimeDependencies,
       ],
     });
 
     // Test job
     this.addUnit({
-      type: 'build',
+      type: 'command',
       identifier: `${packageJson.name}:test`,
       buildCommand: packageJson.scripts?.test ?? 'true',
       root,
@@ -170,14 +170,14 @@ export class MonoRepoAnalyzer {
     workspaceRoot = path.resolve(workspaceRoot);
     packageDir = path.resolve(packageDir);
 
-    const externalDependencies = new Array<BuildDependency>();
+    const externalDependencies = new Array<BuildDepSpec>();
     const repoDependencies = new Array<PackageJsonDependency>();
 
-    const thisPj: PackageJson = JSON.parse(await Deno.readTextFile(path.join(packageDir, 'package.json')));
+    const thisPj: PackageJson = await readJson(path.join(packageDir, 'package.json'));
 
     const deps = new Map<string, PackageJsonDependency>();
     for (const pjName of await findFilesUp('package.json', packageDir, workspaceRoot)) {
-      const pj: PackageJson = JSON.parse(await Deno.readTextFile(pjName));
+      const pj: PackageJson = await readJson(pjName);
 
       for (const [name, versionRange] of Object.entries(pj.devDependencies ?? {})) {
         deps.set(name, { name, versionRange, dependencyType: 'dev' });
@@ -195,16 +195,19 @@ export class MonoRepoAnalyzer {
       if (repoPackage) {
         repoDependencies.push(pjDep);
       } else {
+        const resolvedLocation = path.relative(workspaceRoot, await findPackageDirectory(pjDep.name, packageDir));
+
         externalDependencies.push({
           type: 'npm',
           name: pjDep.name,
           versionRange: pjDep.versionRange,
-          resolvedLocation: path.relative(workspaceRoot, await findPackageDirectory(pjDep.name, packageDir)),
+          version: require(path.resolve(resolvedLocation, 'package.json')).version,
+          resolvedLocation,
         });
       }
     }
 
-    externalDependencies.push(...(thisPj.ostools ?? []).map(executable => ({ type: 'os', executable } as OsDependency)));
+    externalDependencies.push(...(thisPj.nozem?.ostools ?? []).map(executable => ({ type: 'os', executable } as OsDepSpec)));
     externalDependencies.push({ type: 'os', executable: 'node' });
     removeDuplicateDependencies(externalDependencies);
     return { externalDependencies, repoDependencies };
@@ -218,7 +221,7 @@ function transformSome<A, B>(xs: A[], pred: (x: A) => boolean, fn: (x: A) => B):
 
 interface PackageDependencies {
   repoDependencies: PackageJsonDependency[];
-  externalDependencies: BuildDependency[];
+  externalDependencies: BuildDepSpec[];
 }
 
 interface PackageJsonDependency {
@@ -231,7 +234,7 @@ async function findPackageDirectory(packageName: string, root: string): Promise<
   let dir = root;
   while (true) {
     const loc = path.join(dir, 'node_modules', packageName);
-    if (await fs.exists(path.join(loc, 'package.json'))) {
+    if (await exists(path.join(loc, 'package.json'))) {
       return loc;
     }
 
@@ -250,7 +253,7 @@ async function loadPatternFiles(...files: string[]) {
   const ret = new Array<string>();
   for (const file of files) {
     try {
-      const lines = (await Deno.readTextFile(file)).split('\n');
+      const lines = (await fs.readFile(file, { encoding: 'utf-8' })).split('\n');
 
       const importantLines = lines
         .map(l => l.trim())
@@ -262,7 +265,7 @@ async function loadPatternFiles(...files: string[]) {
       // Add at the start, move upward
       ret.push(...importantLines);
     } catch (e) {
-      if (!(e instanceof Deno.errors.NotFound)) { throw e; }
+      if (e.code !== 'ENOENT') { throw e; }
     }
   }
   return ret;
@@ -277,7 +280,7 @@ async function findFilesUp(filename: string, startDir: string, rootDir: string):
   let currentDir = startDir;
   while (true) {
     const fullPath = path.join(currentDir, filename);
-    if (await fs.exists(fullPath)) {
+    if (await exists(fullPath)) {
       ret.push(fullPath);
     }
 
@@ -296,8 +299,8 @@ async function combinedGitIgnores(buildDir: string, rootDir: string) {
   return loadPatternFiles(...gitIgnores);
 }
 
-function removeDuplicateDependencies(ret: BuildDependency[]) {
-  ret.sort((a, b) => buildDependencyId(a).localeCompare(buildDependencyId(b)));
+function removeDuplicateDependencies(ret: BuildDepSpec[]) {
+  ret.sort((a, b) => depSpecRepr(a).localeCompare(depSpecRepr(b)));
   let i = 0;
   while (i < ret.length - 1) {
     if (ret[i] === ret[i + 1]) {

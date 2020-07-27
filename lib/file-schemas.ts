@@ -1,7 +1,13 @@
+/**
+ * Interesting fields in lerna.json
+ */
 export interface LernaJson {
   readonly packages: string[];
 }
 
+/**
+ * Interesting fields in package.json
+ */
 export interface PackageJson {
   readonly name: string;
   readonly version: string;
@@ -12,11 +18,21 @@ export interface PackageJson {
   readonly main?: string;
   readonly jsii?: any;
   readonly scripts?: Record<string, string>;
-  readonly ostools?: string[];
-  readonly nzl$copyAllSourcesForTest?: boolean;
-  readonly nzl$skipTsApiOptimization?: boolean;
+  readonly nozem?: PjNozemOptions;
 }
 
+/**
+ * Nozem options in package.json
+ */
+export interface PjNozemOptions {
+  readonly ostools?: string[];
+  readonly copyAllSourcesForTest?: boolean;
+  readonly skipTsApiOptimization?: boolean;
+}
+
+/**
+ * Interesting fields in tsconfig.json
+ */
 export interface TsconfigJson {
   compilerOptions: {
     composite?: boolean;
