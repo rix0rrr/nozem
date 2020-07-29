@@ -25,13 +25,31 @@ export class OsDependency implements IUnboundBuildDependency, IBuildDependency {
   }
 
   public async installInto(env: BuildEnvironment) {
-    const location = await this.findExecutable();
-    await env.installExecutable(location, this.def.rename);
+    await this.findAndInstall(env, this.def.executable, this.def.rename);
+
+    if (this.def.executable === 'yarn' && process.platform === 'linux') {
+      // On Linux, the yarn executable is a shim that needs a couple of other
+      // binaries installed as well.
+      //
+      // FIXME: This should probably impact the hash in some way...
+      await this.findAndInstall(env, 'sed');
+      await this.findAndInstall(env, 'readlink');
+      await this.findAndInstall(env, 'dirname');
+      await this.findAndInstall(env, 'uname');
+    }
+    if (this.def.executable === 'tar' && process.platform === 'linux') {
+      await this.findAndInstall(env, 'gzip');
+    }
   }
 
-  private async findExecutable() {
+  private async findAndInstall(env: BuildEnvironment, executable: string, rename?: string) {
+    const location = await this.findExecutable(executable);
+    await env.installExecutable(location, rename);
+  }
+
+  private async findExecutable(executable: string) {
     try {
-      const { stdout } = await cpExecFile('which', [this.def.executable], {});
+      const { stdout } = await cpExecFile('which', [executable], {});
       return stdout.trim();
     } catch (e) {
       if (e.code && e.code !== 0) {

@@ -11,7 +11,7 @@ import { BuildQueue } from './build-queue';
 import { createStrategy } from './builds';
 
 export class BuildGraph {
-  private readonly graph = new Graph<BuildNode>();
+  public readonly graph = new Graph<BuildNode>();
   private readonly ids = new Map<string, BuildNode>();
   private readonly depCache = new Map<string, IUnboundBuildDependency>();
 
@@ -49,14 +49,10 @@ export class BuildGraph {
     return this.graph.sorted();
   }
 
-  public queueFor(targets: string[]) {
+  public incomingClosure(targets: string[]) {
     const nodes = targets.map(t => this.lookup(t));
     const incomingClosure = this.graph.feedsInto(...nodes);
-    return new BuildQueue(this.graph.subgraph(incomingClosure));
-  }
-
-  public queue() {
-    return new BuildQueue(this.graph);
+    return this.graph.subgraph(incomingClosure);
   }
 
   private makeDependency(dep: BuildDepSpec): IUnboundBuildDependency {

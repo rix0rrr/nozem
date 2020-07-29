@@ -1,4 +1,4 @@
-export interface NazelJson {
+export interface NozemJson {
   units: UnitDefinition[];
 }
 

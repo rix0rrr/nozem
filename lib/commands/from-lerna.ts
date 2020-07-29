@@ -4,7 +4,7 @@ import * as log from '../util/log';
 
 import { PackageJson, LernaJson } from '../file-schemas';
 import { writeJson, readJson, exists, globMany } from '../util/files';
-import { UnitDefinition, NazelJson, InternalNpmDepSpec, NpmDepSpec, CopyDepSpec, BuildDepSpec, depSpecRepr, OsDepSpec } from '../nozem-schema';
+import { UnitDefinition, NozemJson, InternalNpmDepSpec, NpmDepSpec, CopyDepSpec, BuildDepSpec, depSpecRepr, OsDepSpec } from '../nozem-schema';
 
 export async function fromLerna() {
   const analyzer = new MonoRepoAnalyzer();
@@ -28,12 +28,12 @@ export class MonoRepoAnalyzer {
       await this.addBuildNodes(pkg.filename, pkg.packageJson);
     }
 
-    const nazelFile: NazelJson = {
+    const nozemFile: NozemJson = {
       units: Array.from(this.units.values()),
     };
 
     log.info('Writing nozem.json');
-    await writeJson('nozem.json', nazelFile);
+    await writeJson('nozem.json', nozemFile);
   }
 
   private async findPackages() {

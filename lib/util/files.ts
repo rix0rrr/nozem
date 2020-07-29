@@ -90,7 +90,8 @@ export async function walkFiles(root: string, matcher: FileMatcher, visitor: (cb
   const relPaths = ['.'];
   while (relPaths.length > 0) {
     const relPath = relPaths.pop()!;
-    for await (const child of await fs.opendir(path.join(root, relPath))) {
+    // opendir is Node 12+, so use readdir instead
+    for await (const child of await fs.readdir(path.join(root, relPath), { withFileTypes: true })) {
       const relChildPath = path.join(relPath, child.name);
       if (child.isDirectory() && matcher.visitDirectory(relChildPath)) {
         relPaths.push(relChildPath);

@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as os from 'os';
 import * as child_process from 'child_process';
 import { promises as fs } from 'fs';
 import * as log from './util/log';
@@ -13,6 +14,10 @@ const outHashSym = Symbol();
 const RETAIN_CACHE_DIRS = 2;
 
 export class BuildWorkspace {
+  public static defaultWorkspace() {
+    return new BuildWorkspace(path.resolve(os.homedir() ?? '.', '.nozem-build'));
+  }
+
   private readonly buildDir: string;
   private readonly cacheDir: string;
   private readonly cached = new Map<string, BuildOutput>();
@@ -118,17 +123,20 @@ export class BuildEnvironment {
     return await FileSet.fromMatcher(this.srcDir, matcher);
   }
 
-  public async execute(command: string, env: Record<string, string>) {
+  public async execute(command: string, env: Record<string, string>, logDir: string) {
     log.debug(`[${this.srcDir}] ${command}`);
 
     try {
-      await cpExec(command, {
+      const { stdout, stderr } = await cpExec(command, {
         cwd: this.srcDir,
         env: {
           PATH: this.binDir,
           ...env
         }
       });
+
+      await fs.writeFile(path.join(logDir, 'stdout.log'), stdout, { encoding: 'utf-8' });
+      await fs.writeFile(path.join(logDir, 'stderr.log'), stderr, { encoding: 'utf-8' });
     } catch (e) {
       if (e.stdout) { process.stderr.write(e.stdout); }
       if (e.stderr) { process.stderr.write(e.stderr); }

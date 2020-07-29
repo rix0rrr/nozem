@@ -60,14 +60,19 @@ export class BuildNode {
 
   public async build(env: BuildEnvironment): Promise<void> {
     log.info(`Build  ${this.identifier}`);
-    const start = Date.now();
+    try {
+      const start = Date.now();
 
-    const output = await env.makeTemporaryOutput();
-    await this.strategy.build(this, env, output);
-    this._output = await output.finalize();
+      const output = await env.makeTemporaryOutput();
+      await this.strategy.build(this, env, output);
+      this._output = await output.finalize();
 
-    const delta = (Date.now() - start) / 1000;
-    log.info(`Finish ${this.identifier} (${delta.toFixed(1)}s)`);
+      const delta = (Date.now() - start) / 1000;
+      log.info(`Finish ${this.identifier} (${delta.toFixed(1)}s)`);
+    } catch (e) {
+      log.error(`Failed ${this.identifier}: ${e.message}`);
+      throw e;
+    }
   }
 
   public useOutput(output: BuildOutput) {

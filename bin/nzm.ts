@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * A build tool inspired by Bazel, but written for piecemeal migration.
  *
@@ -38,11 +39,12 @@ async function main() {
       alias: 'c',
       type: 'number',
       desc: 'How many concurrent jobs to run',
-      default: 1,
+      default: 4,
       requiresArg: true,
     })
     .command('from-lerna', 'Extract a nozem build model from a Lerna monorepo structure')
     .command('build [TARGET..]', 'Build targets', command => command
+      .option('bail', { alias: 'b', type: 'boolean', default: true })
       .positional('TARGET', { type: 'string', array: true, describe: 'Packages to build, default all' })
     )
     .demandCommand()
@@ -60,7 +62,8 @@ async function main() {
     case 'build':
       return await commands.build({
         concurrency: argv.concurrency,
-        targets: argv.TARGET
+        targets: argv.TARGET,
+        bail: argv.bail,
       });
   }
 }

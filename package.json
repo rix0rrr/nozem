@@ -16,6 +16,9 @@
     "jest": "^26.1.0",
     "typescript": "^3.9.7"
   },
+  "bin": {
+    "nzm": "dist/bin/nzm.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "jest"

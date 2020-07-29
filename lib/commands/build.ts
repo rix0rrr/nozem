@@ -1,29 +1,33 @@
 import * as log from '../util/log';
-import * as path from 'path';
-import * as os from 'os';
 import { BuildGraph } from "../build-graph";
-import { NazelJson } from '../nozem-schema';
+import { NozemJson } from '../nozem-schema';
 import { BuildWorkspace } from '../build-tools';
 import { readJson } from '../util/files';
+import { BuildQueue } from '../build-queue';
 
 export interface BuildOptions {
   readonly concurrency?: number;
   readonly targets?: string[];
+  readonly bail?: boolean;
 }
 
 export async function build(options: BuildOptions = {}) {
-  const nazelJson: NazelJson = await readJson('nozem.json');
+  const nozemJson: NozemJson = await readJson('nozem.json');
 
-  const graph = new BuildGraph(nazelJson.units);
+  const buildGraph = new BuildGraph(nozemJson.units);
+  await buildGraph.build();
 
-  await graph.build();
-  const workspace = new BuildWorkspace(path.resolve(os.userInfo().homedir ?? '.', '.nazel-build'));
+  const workspace = BuildWorkspace.defaultWorkspace();
 
-  const queue = (options.targets ?? []).length > 0 ? graph.queueFor(options.targets!) : graph.queue();
+  const targetGraph = (options.targets ?? []).length > 0 ? buildGraph.incomingClosure(options.targets!) : buildGraph.graph;
+  const queue = new BuildQueue(targetGraph, {
+    concurrency: options.concurrency || 4,
+    bail: options.bail,
+  });
   await queue.writeGraphViz('build.dot');
   log.info(`${queue.size} nodes to build`);
 
-  await queue.parallel(options.concurrency || 4, async (node) => {
+  await queue.execute(async (node) => {
     const hash = await node.inHash();
 
     let built = await workspace.fromCache(node.identifier, hash);

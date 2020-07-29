@@ -21,9 +21,6 @@ export class CommandBuildStrategy implements IBuildStrategy {
     protected readonly sourceFiles: FileSet) {
   }
 
-  public async addDerivations(output: TemporaryBuildOutput) {
-  }
-
   public async build(node: BuildNode, env: BuildEnvironment, target: TemporaryBuildOutput) {
     await node.installDependencies(env);
     await env.addSrcFiles(this.sourceFiles);
@@ -58,7 +55,7 @@ export class CommandBuildStrategy implements IBuildStrategy {
       try {
         await env.execute(this.def.buildCommand, {
           NZM_PACKAGE_SOURCE: path.resolve(this.def.root),
-        });
+        }, env.root);
       } catch (e) {
         log.error(`${this.def.identifier} failed`);
         throw e;

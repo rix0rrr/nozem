@@ -8,18 +8,18 @@ export function setVerbose(v: boolean) {
 
 export function debug(s: string) {
   if (verbose) {
-    console.debug(chalk.gray(s));
+    process.stderr.write(chalk.gray(s) + '\n');
   }
 }
 
 export function info(s: string) {
-  console.log(chalk.blue(s));
+  process.stderr.write(chalk.blue(s) + '\n');
 }
 
 export function warning(s: string) {
-  console.warn(chalk.yellow(s));
+  process.stderr.write(chalk.yellow(s) + '\n');
 }
 
 export function error(s: string) {
-  console.error(chalk.red(s));
+  process.stderr.write(chalk.red(s) + '\n');
 }
