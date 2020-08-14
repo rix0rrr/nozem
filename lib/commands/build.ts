@@ -18,9 +18,7 @@ export async function build(options: BuildOptions = {}) {
   const buildGraph = new BuildGraph(nozemJson.units);
   await buildGraph.build();
 
-  const workspace = BuildWorkspace.defaultWorkspace(
-    nozemJson.cache ? new S3Cache(nozemJson.cache.bucketName) : undefined,
-    );
+  const workspace = await BuildWorkspace.detectConfiguration('.');
 
   const targetGraph = (options.targets ?? []).length > 0 ? buildGraph.incomingClosure(options.targets!) : buildGraph.graph;
   const queue = new BuildQueue(targetGraph, {

@@ -3,9 +3,11 @@ import * as os from 'os';
 import * as child_process from 'child_process';
 import { promises as fs } from 'fs';
 import * as log from './util/log';
-import { exists, FileSet, FilePatterns, FileMatcher, copy, rimraf, ensureSymlink, ignoreEnoent, removeOldSubDirectories } from './util/files';
+import { exists, FileSet, FilePatterns, FileMatcher, copy, rimraf, ensureSymlink, ignoreEnoent, removeOldSubDirectories, findFilesUp, readJson } from './util/files';
 import * as util from 'util';
 import { cachedPromise } from './util/runtime';
+import { NozemCacheJson } from './nozem-schema';
+import { S3Cache } from './aws/s3cache';
 
 const cpExec = util.promisify(child_process.exec);
 
@@ -27,6 +29,19 @@ export interface IRemoteCache {
 export class BuildWorkspace {
   public static defaultWorkspace(remoteCache?: IRemoteCache) {
     return new BuildWorkspace(path.resolve(os.homedir() ?? '.', '.nozem-build'), remoteCache);
+  }
+
+  public static async detectConfiguration(dir: string) {
+    const cacheConfigs = await findFilesUp('nozem-cache.json', dir);
+    const cacheConfig: NozemCacheJson | undefined = cacheConfigs.length > 0 ? await readJson(cacheConfigs[cacheConfigs.length - 1]) : undefined;
+
+    const cacheDir = cacheConfig?.cacheDir ?? path.resolve(os.homedir() ?? '.', '.nozem-build');
+    let remoteCache;
+    if (cacheConfig?.cacheBucket) {
+      log.info(`Using remote caching bucket ${cacheConfig.cacheBucket.bucketName}`);
+      remoteCache = new S3Cache(cacheConfig.cacheBucket.bucketName, cacheConfig?.cacheBucket?.region, cacheConfig?.cacheBucket?.profileName)
+    }
+    return new BuildWorkspace(cacheDir, remoteCache);
   }
 
   private readonly buildDir: string;

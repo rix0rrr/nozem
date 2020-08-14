@@ -324,3 +324,26 @@ export async function removeOldSubDirectories(n: number, dirName: string) {
     }
   });
 }
+
+export async function findFilesUp(filename: string, startDir: string, rootDir?: string): Promise<string[]> {
+  const ret = new Array<string>();
+
+  startDir = path.resolve(startDir);
+  rootDir = rootDir ? path.resolve(rootDir) : undefined;
+
+  let currentDir = startDir;
+  while (true) {
+    const fullPath = path.join(currentDir, filename);
+    if (await exists(fullPath)) {
+      ret.push(fullPath);
+    }
+
+    if (currentDir === rootDir) { break; }
+    const next = path.dirname(currentDir);
+    if (next === currentDir) { break; }
+    currentDir = next;
+  }
+
+  // Most specific file at the end
+  return ret.reverse();
+}

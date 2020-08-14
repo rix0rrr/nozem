@@ -1,6 +1,16 @@
 export interface NozemJson {
-  cache?: CacheDefinition;
-  units: UnitDefinition[];
+  readonly units: UnitDefinition[];
+}
+
+export interface NozemCacheJson {
+  readonly cacheDir?: string;
+  readonly cacheBucket?: NozemCacheBucket;
+}
+
+export interface NozemCacheBucket {
+  readonly bucketName: string;
+  readonly profileName?: string;
+  readonly region?: string;
 }
 
 export interface CacheDefinition {

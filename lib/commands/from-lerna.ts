@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import * as log from '../util/log';
 
 import { PackageJson, LernaJson } from '../file-schemas';
-import { writeJson, readJson, exists, globMany } from '../util/files';
+import { writeJson, readJson, exists, globMany, findFilesUp } from '../util/files';
 import { UnitDefinition, NozemJson, InternalNpmDepSpec, NpmDepSpec, CopyDepSpec, BuildDepSpec, depSpecRepr, OsDepSpec } from '../nozem-schema';
 
 export async function fromLerna() {
@@ -269,29 +269,6 @@ async function loadPatternFiles(...files: string[]) {
     }
   }
   return ret;
-}
-
-async function findFilesUp(filename: string, startDir: string, rootDir: string): Promise<string[]> {
-  const ret = new Array<string>();
-
-  startDir = path.resolve(startDir);
-  rootDir = path.resolve(rootDir);
-
-  let currentDir = startDir;
-  while (true) {
-    const fullPath = path.join(currentDir, filename);
-    if (await exists(fullPath)) {
-      ret.push(fullPath);
-    }
-
-    if (currentDir === rootDir) { break; }
-    const next = path.dirname(currentDir);
-    if (next === currentDir) { break; }
-    currentDir = next;
-  }
-
-  // Most specific file at the end
-  return ret.reverse();
 }
 
 async function combinedGitIgnores(buildDir: string, rootDir: string) {

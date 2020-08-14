@@ -4,18 +4,20 @@ import * as log from '../util/log';
 import { promises as fs } from 'fs';
 import * as tar from 'tar';
 
-process.env.AWS_NODEJS_CONNECTION_REUSE_ENABLED = '1';
-process.env.AWS_SDK_LOAD_CONFIG = '1';
-
-import * as AWS from 'aws-sdk';
 import { IRemoteCache, PackageVersion } from '../build-tools';
 import { exists } from '../util/files';
 
 export class S3Cache implements IRemoteCache {
-  private readonly s3: AWS.S3;
+  private readonly s3: import('aws-sdk').S3;
 
-  constructor(private readonly bucketName: string) {
-    this.s3 = new AWS.S3();
+  constructor(private readonly bucketName: string, region?: string, profileName?: string) {
+    process.env.AWS_NODEJS_CONNECTION_REUSE_ENABLED = '1';
+    process.env.AWS_SDK_LOAD_CONFIG = '1';
+    if (profileName) {
+      process.env.AWS_PROFILE = profileName;
+    }
+
+    this.s3 = new (require('aws-sdk')).S3({ region });
   }
 
   public async contains(pv: PackageVersion): Promise<boolean> {
