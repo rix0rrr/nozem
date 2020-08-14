@@ -1,0 +1,8 @@
+**/*.ts
+!**/*.d.ts
+.github
+test/
+jest.config.js
+DESIGN.md
+LEARNINGS.md
+*.tgz
