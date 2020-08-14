@@ -1,14 +1,15 @@
-import { BuildEnvironment, BuildOutput } from "./build-tools";
+import { BuildEnvironment, BuildOutput, PackageVersion } from "./build-tools";
 import { IBuildDependency, IUnboundBuildDependency } from "./deps";
 import { FileSet, standardHash } from "./util/files";
 import { BuildGraph } from "./build-graph";
 import { IBuildStrategy } from "./builds/build-strategy";
-import { flatMap } from "./util/runtime";
+import { flatMap, cachedPromise } from "./util/runtime";
 import * as log from './util/log';
+
+const inHashSym = Symbol();
 
 export class BuildNode {
   private _output: BuildOutput | undefined;
-  private _hash?: string;
 
   constructor(public readonly identifier: string, private readonly strategy: IBuildStrategy, private readonly unboundDependencies: IUnboundBuildDependency[]) {
   }
@@ -30,7 +31,7 @@ export class BuildNode {
   }
 
   public async inHash(): Promise<string> {
-    if (this._hash === undefined) {
+    return cachedPromise(this, inHashSym, async() => {
       const d = standardHash();
       d.update('identifier:');
       d.update(this.identifier);
@@ -42,9 +43,8 @@ export class BuildNode {
       }
       d.update('def:');
       await this.strategy.updateInhash(d);
-      this._hash = d.digest('hex');
-    }
-    return this._hash;
+      return d.digest('hex');
+    });
   }
 
   public get isBuilt() {
@@ -58,17 +58,32 @@ export class BuildNode {
     return this._output;
   }
 
+  public async packageVersion(): Promise<PackageVersion> {
+    return { packageName: this.identifier, inHash: await this.inHash() };
+  }
+
   public async build(env: BuildEnvironment): Promise<void> {
     log.info(`Build  ${this.identifier}`);
     try {
       const start = Date.now();
+      await this.installDependencies(env);
 
+      const pv = await this.packageVersion();
       const output = await env.makeTemporaryOutput();
-      await this.strategy.build(this, env, output);
-      this._output = await output.finalize();
+
+      let verb = 'Finish';
+      if (await env.workspace.remoteCache?.contains(pv)) {
+        await env.workspace.remoteCache?.fetch(pv, output.mainWritingDirectory);
+        this._output = await output.finalize();
+        verb = 'Fetched';
+      } else {
+        await this.strategy.build(this, env, output);
+        this._output = await output.finalize();
+        env.workspace.remoteCache?.queueForStoring(pv, this._output.mainDirectory);
+      }
 
       const delta = (Date.now() - start) / 1000;
-      log.info(`Finish ${this.identifier} (${delta.toFixed(1)}s)`);
+      log.info(`${verb} ${this.identifier} (${delta.toFixed(1)}s)`);
     } catch (e) {
       log.error(`Failed ${this.identifier}: ${e.message}`);
       throw e;

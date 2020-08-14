@@ -22,7 +22,6 @@ export class CommandBuildStrategy implements IBuildStrategy {
   }
 
   public async build(node: BuildNode, env: BuildEnvironment, target: TemporaryBuildOutput) {
-    await node.installDependencies(env);
     await env.addSrcFiles(this.sourceFiles);
     await this.runBuildCommand(env);
     await this.copyOutBuildArtifacts(env, target);

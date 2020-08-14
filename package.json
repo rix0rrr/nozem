@@ -7,12 +7,15 @@
     "lib": "lib"
   },
   "dependencies": {
+    "aws-sdk": "^2.724.0",
     "chalk": "^4.1.0",
+    "tar": "^6.0.2",
     "yargs": "^15.4.1"
   },
   "devDependencies": {
     "@types/jest": "^26.0.7",
     "@types/node": "^14.0.24",
+    "@types/tar": "^4.0.3",
     "jest": "^26.1.0",
     "typescript": "^3.9.7"
   },

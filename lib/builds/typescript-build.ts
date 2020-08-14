@@ -24,7 +24,6 @@ export class TypeScriptBuildStrategy extends CommandBuildStrategy {
   }
 
   public async build(node: BuildNode, env: BuildEnvironment, target: TemporaryBuildOutput) {
-    await node.installDependencies(env);
     await env.addSrcFiles(this.sourceFiles);
 
     if (this.tsDef.patchTsconfig) {

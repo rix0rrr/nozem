@@ -1,5 +1,10 @@
 export interface NozemJson {
+  cache?: CacheDefinition;
   units: UnitDefinition[];
+}
+
+export interface CacheDefinition {
+  readonly bucketName: string;
 }
 
 /**
@@ -46,6 +51,11 @@ export interface CommandBuildDefinition extends DefinitionCommon {
    * Build command
    */
   readonly buildCommand?: string;
+
+  /**
+   * Whether or not this node is worth remote caching
+   */
+  readonly worthRemoteCaching?: boolean;
 }
 
 export interface TypescriptBuildDefinition extends CommandBuildDefinition {

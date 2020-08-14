@@ -13,22 +13,33 @@ const outHashSym = Symbol();
 
 const RETAIN_CACHE_DIRS = 2;
 
+export interface PackageVersion {
+  readonly packageName: string;
+  readonly inHash: string;
+}
+
+export interface IRemoteCache {
+  contains(pv: PackageVersion): Promise<boolean>;
+  fetch(pv: PackageVersion, targetDir: string): Promise<void>;
+  queueForStoring(pv: PackageVersion, sourceDir: string): void;
+}
+
 export class BuildWorkspace {
-  public static defaultWorkspace() {
-    return new BuildWorkspace(path.resolve(os.homedir() ?? '.', '.nozem-build'));
+  public static defaultWorkspace(remoteCache?: IRemoteCache) {
+    return new BuildWorkspace(path.resolve(os.homedir() ?? '.', '.nozem-build'), remoteCache);
   }
 
   private readonly buildDir: string;
   private readonly cacheDir: string;
   private readonly cached = new Map<string, BuildOutput>();
 
-  constructor(private readonly root: string) {
+  constructor(private readonly root: string, public readonly remoteCache?: IRemoteCache) {
     this.buildDir = path.join(this.root, 'build');
     this.cacheDir = path.join(this.root, 'cache');
   }
 
-  public async fromCache(packageName: string, inHash: string): Promise<BuildOutput | undefined> {
-    const dir = this.outputCacheDir(packageName, inHash);
+  public async fromCache(pv: PackageVersion): Promise<BuildOutput | undefined> {
+    const dir = this.outputCacheDir(pv.packageName, pv.inHash);
     if (!await exists(dir)) { return undefined; }
 
     if (!this.cached.has(dir)) {
@@ -37,14 +48,14 @@ export class BuildWorkspace {
     return this.cached.get(dir)!;
   }
 
-  public async makeBuildEnvironment(packageName: string, inHash: string) {
-    const dir = path.join(this.buildDir, slugify(packageName));
+  public async makeBuildEnvironment(pv: PackageVersion) {
+    const dir = path.join(this.buildDir, slugify(pv.packageName));
     if (await exists(dir)) {
       await rimraf(dir);
     }
     await fs.mkdir(dir, { recursive: true });
 
-    const cacheDir = this.outputCacheDir(packageName, inHash);
+    const cacheDir = this.outputCacheDir(pv.packageName, pv.inHash);
     await removeOldSubDirectories(RETAIN_CACHE_DIRS, path.dirname(cacheDir));
 
     return new BuildEnvironment(this, dir, cacheDir);
@@ -69,8 +80,6 @@ export class BuildWorkspace {
 export class BuildEnvironment {
   public readonly binDir: string;
   public readonly srcDir: string;
-  private _outFiles?: FileSet;
-  private _outHash?: Promise<string>;
 
   constructor(
     public readonly workspace: BuildWorkspace,

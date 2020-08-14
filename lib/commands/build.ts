@@ -4,6 +4,7 @@ import { NozemJson } from '../nozem-schema';
 import { BuildWorkspace } from '../build-tools';
 import { readJson } from '../util/files';
 import { BuildQueue } from '../build-queue';
+import { S3Cache } from '../aws/s3cache';
 
 export interface BuildOptions {
   readonly concurrency?: number;
@@ -17,7 +18,9 @@ export async function build(options: BuildOptions = {}) {
   const buildGraph = new BuildGraph(nozemJson.units);
   await buildGraph.build();
 
-  const workspace = BuildWorkspace.defaultWorkspace();
+  const workspace = BuildWorkspace.defaultWorkspace(
+    nozemJson.cache ? new S3Cache(nozemJson.cache.bucketName) : undefined,
+    );
 
   const targetGraph = (options.targets ?? []).length > 0 ? buildGraph.incomingClosure(options.targets!) : buildGraph.graph;
   const queue = new BuildQueue(targetGraph, {
@@ -28,14 +31,14 @@ export async function build(options: BuildOptions = {}) {
   log.info(`${queue.size} nodes to build`);
 
   await queue.execute(async (node) => {
-    const hash = await node.inHash();
+    const pv = await node.packageVersion();
 
-    let built = await workspace.fromCache(node.identifier, hash);
+    let built = await workspace.fromCache(pv);
     if (built) {
       log.debug(`From cache: ${node.identifier} (${built.root})`);
       node.useOutput(built);
     } else {
-      const env = await workspace.makeBuildEnvironment(node.identifier, hash);
+      const env = await workspace.makeBuildEnvironment(pv);
       await node.build(env);
     }
   });

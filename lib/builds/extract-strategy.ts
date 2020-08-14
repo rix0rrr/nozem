@@ -24,7 +24,6 @@ export class ExtractNode implements IBuildStrategy {
   }
 
   public async build(node: BuildNode, env: BuildEnvironment, target: TemporaryBuildOutput): Promise<void> {
-    await node.installDependencies(env);
     await (await env.inSourceArtifacts(this.pattern.toIncludeMatcher())).copyTo(target.mainWritingDirectory);
   }
 }
