@@ -20,7 +20,8 @@
     "typescript": "^3.9.7"
   },
   "bin": {
-    "nzm": "dist/bin/nzm.js"
+    "nzm": "dist/bin/nzm.js",
+    "nozem": "dist/bin/nzm.js"
   },
   "scripts": {
     "build": "tsc",
