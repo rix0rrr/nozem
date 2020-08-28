@@ -51,10 +51,7 @@ export class FileSet {
       const d = standardHash();
 
       // error: Uncaught Error: Too many open files (os error 24)
-      d.update((await promiseAllBatch(8, this.fileNames.map((file) => async () => {
-        const fullPath = path.join(this.root, file);
-        return `${file}\n${fileHash(fullPath)}\n`;
-      }))).join(''));
+      d.update(await this.fileHashes());
 
       const delta = (Date.now() - start) / 1000;
       if (delta > 2) {
@@ -63,6 +60,13 @@ export class FileSet {
 
       return d.digest('hex');
     });
+  }
+
+  public async fileHashes() {
+    return (await promiseAllBatch(8, this.fileNames.map((file) => async () => {
+      const fullPath = path.join(this.root, file);
+      return `${file}\n${await fileHash(fullPath)}\n`;
+    }))).join('');
   }
 }
 
