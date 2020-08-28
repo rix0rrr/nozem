@@ -6,6 +6,7 @@ import { UnitDefinition, BuildDepSpec, depSpecRepr } from './nozem-schema';
 import { BuildNode } from './build-node';
 import { createStrategy } from './builds';
 import { exists } from './util/files';
+import { SimpleError } from './util/flow';
 
 export class BuildGraph {
   public readonly graph = new Graph<BuildNode>();
@@ -38,7 +39,7 @@ export class BuildGraph {
 
   public lookup(id: string) {
     const ret = this.ids.get(id);
-    if (!ret) { throw new Error(`No node with id: ${id}`); }
+    if (!ret) { throw new SimpleError(`No node with id: ${id}`); }
     return ret;
   }
 
@@ -56,7 +57,7 @@ export class BuildGraph {
     const nodes = new Array<BuildNode>();
     const msg = [];
     for (const target of targets) {
-      if (exists(target, s => s.isDirectory())) {
+      if (await exists(target, s => s.isDirectory())) {
         const fullDir = path.resolve(target);
         const relDir = path.relative(this.rootDirectory, fullDir);
         msg.push(`nodes under '${fullDir}'`);
