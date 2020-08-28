@@ -1,4 +1,5 @@
 import { IBuildStrategy, IDigestLike } from './build-strategy';
+import * as os from 'os';
 import * as path from 'path';
 import { CommandBuildDefinition } from '../nozem-schema';
 import { FilePatterns, FileSet } from '../util/files';
@@ -31,6 +32,12 @@ export class CommandBuildStrategy implements IBuildStrategy {
   public async updateInhash(d: IDigestLike) {
     d.update('command:');
     d.update(this.def.buildCommand ?? '');
+    if (Object.keys(this.def.env ?? {}).length > 0) {
+      d.update('env:');
+      for (const [k, v] of Object.entries(this.def.env ?? {})) {
+        d.update(`${k}=${v}\n`);
+      }
+    }
     d.update('files:');
     d.update(await this.sourceFiles.hash());
     d.update('deps:');
@@ -55,6 +62,7 @@ export class CommandBuildStrategy implements IBuildStrategy {
       try {
         await env.execute(this.def.buildCommand, {
           NZM_PACKAGE_SOURCE: path.resolve(this.def.root),
+          ...this.translateEnvVars(this.def.env),
         }, env.root);
       } catch (e) {
         log.error(`${this.def.identifier} failed`);
@@ -68,5 +76,13 @@ export class CommandBuildStrategy implements IBuildStrategy {
     // files to the output directory.
     const artifactMatcher = new FilePatterns(this.def.nonArtifacts).toComplementaryMatcher();
     await (await env.inSourceArtifacts(artifactMatcher)).copyTo(target.mainWritingDirectory);
+  }
+
+  private translateEnvVars(vars?: Record<string, string>): Record<string, string> {
+    const ret: Record<string, string> = {};
+    for (const [k, v] of Object.entries(vars ?? {})) {
+      ret[k] = v.replace(/~/g, os.homedir());
+    }
+    return ret;
   }
 }

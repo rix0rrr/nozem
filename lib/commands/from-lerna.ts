@@ -87,6 +87,10 @@ export class MonoRepoAnalyzer {
       nonSources,
       nonArtifacts,
       patchTsconfig: true,
+      env: {
+        // Not strictly hermetic anymore, but it seems hard to achieve success otherwise
+        ...(hasDotnet(buildDependencies) ? { DOTNET_CLI_HOME: '~' } : undefined)
+      },
     });
 
     // API closure
@@ -140,6 +144,10 @@ export class MonoRepoAnalyzer {
         { type: 'copy', node: packageJson.name },
         ...runtimeDependencies,
       ],
+      env: {
+        // Not strictly hermetic anymore, but it seems hard to achieve success otherwise
+        ...(hasDotnet(runtimeDependencies) ? { DOTNET_CLI_HOME: '~' } : undefined)
+      },
     });
 
     return ;
@@ -287,4 +295,8 @@ function removeDuplicateDependencies(ret: BuildDepSpec[]) {
     }
   }
   return ret;
+}
+
+function hasDotnet(deps: BuildDepSpec[]) {
+  return deps.some(d => d.type === 'os' && d.executable === 'dotnet');
 }

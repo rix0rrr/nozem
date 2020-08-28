@@ -66,6 +66,11 @@ export interface CommandBuildDefinition extends DefinitionCommon {
    * Whether or not this node is worth remote caching
    */
   readonly worthRemoteCaching?: boolean;
+
+  /**
+   * Additional environment variables
+   */
+  readonly env?: Record<string, string>;
 }
 
 export interface TypescriptBuildDefinition extends CommandBuildDefinition {
