@@ -12,10 +12,10 @@ export * from './external-npm-dependency';
 export * from './internal-npm-dependency';
 export * from './os-dependency';
 
-export function createDependency(dep: BuildDepSpec): IUnboundBuildDependency {
+export function createDependency(rootDirectory: string, dep: BuildDepSpec): IUnboundBuildDependency {
   switch (dep.type) {
     case 'link-npm': return new UnboundDependency(g => new InternalNpmDependency(dep, g.lookup(dep.node)));
-    case 'npm': return new ExternalNpmDependency(dep);
+    case 'npm': return new ExternalNpmDependency(rootDirectory, dep);
     case 'os': return new OsDependency(dep);
     case 'copy': return new UnboundDependency(g => new CopyFilesDependency(dep, g.lookup(dep.node)));
   }

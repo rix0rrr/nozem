@@ -41,7 +41,7 @@ export async function build(options: BuildOptions) {
     concurrency: options.concurrency || 4,
     bail: options.bail,
   });
-  await queue.writeGraphViz('build.dot');
+  // await queue.writeGraphViz(path.join(nozemJsonDir, 'build.dot'));
   log.info(`${queue.size} nodes to build`);
 
   await queue.execute(async (node) => {

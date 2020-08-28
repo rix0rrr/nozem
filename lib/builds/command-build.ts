@@ -7,16 +7,17 @@ import * as log from '../util/log';
 import { BuildEnvironment, TemporaryBuildOutput } from '../build-tools';
 
 export class CommandBuildStrategy implements IBuildStrategy {
-  public static async fromDefinition(def: CommandBuildDefinition): Promise<CommandBuildStrategy> {
+  public static async fromDefinition(rootDirectory: string, def: CommandBuildDefinition): Promise<CommandBuildStrategy> {
     const gitignorePattern = new FilePatterns(def.nonSources);
-    const files = await FileSet.fromMatcher(def.root, gitignorePattern.toComplementaryMatcher());
-    return new CommandBuildStrategy(def, files);
+    const files = await FileSet.fromMatcher(path.join(rootDirectory, def.root), gitignorePattern.toComplementaryMatcher());
+    return new CommandBuildStrategy(rootDirectory, def, files);
   }
 
   public readonly identifier: string = 'command-build';
   public readonly version: string = '1';
 
   protected constructor(
+    protected readonly root: string,
     protected readonly def: CommandBuildDefinition,
     protected readonly sourceFiles: FileSet) {
   }

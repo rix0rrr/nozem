@@ -19,7 +19,7 @@ export class BuildGraph {
     for (const unit of this.units) {
       const node = new BuildNode(
         unit.identifier,
-        await createStrategy(unit),
+        await createStrategy(this.rootDirectory, unit),
         (unit.dependencies ?? []).map(d => this.makeDependency(d))
         );
       this.graph.addNode(node);
@@ -85,7 +85,7 @@ export class BuildGraph {
   private makeDependency(dep: BuildDepSpec): IUnboundBuildDependency {
     const key = depSpecRepr(dep);
     if (!this.depCache.has(key)) {
-      this.depCache.set(key, createDependency(dep));
+      this.depCache.set(key, createDependency(this.rootDirectory, dep));
     }
     return this.depCache.get(key)!;
   }

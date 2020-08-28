@@ -8,19 +8,20 @@ import { BuildEnvironment, TemporaryBuildOutput } from '../build-tools';
 import { IDigestLike } from './build-strategy';
 
 export class TypeScriptBuildStrategy extends CommandBuildStrategy {
-  public static async fromTsDefinition(def: TypescriptBuildDefinition): Promise<CommandBuildStrategy> {
+  public static async fromTsDefinition(rootDirectory: string, def: TypescriptBuildDefinition): Promise<CommandBuildStrategy> {
     const gitignorePattern = new FilePatterns(def.nonSources);
-    const files = await FileSet.fromMatcher(def.root, gitignorePattern.toComplementaryMatcher());
-    return new TypeScriptBuildStrategy(def, files);
+    const files = await FileSet.fromMatcher(path.join(rootDirectory, def.root), gitignorePattern.toComplementaryMatcher());
+    return new TypeScriptBuildStrategy(rootDirectory, def, files);
   }
 
   public readonly identifier: string = 'typescript-build';
   public readonly version: string = '1';
 
   private constructor(
+    rootDirectory: string,
     private readonly tsDef: TypescriptBuildDefinition,
     sourceFiles: FileSet) {
-    super(tsDef, sourceFiles);
+    super(rootDirectory, tsDef, sourceFiles);
   }
 
   public async build(node: BuildNode, env: BuildEnvironment, target: TemporaryBuildOutput) {

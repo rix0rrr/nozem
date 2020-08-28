@@ -15,7 +15,7 @@ export class ExternalNpmDependency implements IUnboundBuildDependency, IBuildDep
 
   private _version?: string;
 
-  constructor(private readonly def: NpmDepSpec) {
+  constructor(private readonly rootDirectory: string, private readonly def: NpmDepSpec) {
   }
 
   public bind(graph: BuildGraph): void {
@@ -25,14 +25,18 @@ export class ExternalNpmDependency implements IUnboundBuildDependency, IBuildDep
     // FIXME: Should get package hash from Yarn, going to
     // go with the version number from 'package.json' for now.
     if (this._version === undefined) {
-      const pj: PackageJson = await readJson(path.join(this.def.resolvedLocation, 'package.json'));
+      const pj: PackageJson = await readJson(path.join(this.absolutePackageDir, 'package.json'));
       this._version = pj.version;
     }
     return this._version;
   }
 
   public async installInto(env: BuildEnvironment) {
-    await installNpmPackage(this.def.resolvedLocation, env, true);
+    await installNpmPackage(this.absolutePackageDir, env, true);
+  }
+
+  private get absolutePackageDir() {
+    return path.join(this.rootDirectory, this.def.resolvedLocation);
   }
 }
 
