@@ -74,12 +74,12 @@ export class BuildGraph {
     log.info(`Selecting ${msg.join(', ')}.`);
     return this.graph.subgraph([
       ...this.graph.feedsInto(...nodes),
-      ...downstream ? this.graph.reachableFrom(...nodes) : [],
+      ...(downstream ? this.graph.reachableFrom(...nodes) : []),
     ]);
   }
 
   private nodesUnderDir(dir: string) {
-    const units = this.units.filter(unit => (unit.type === 'command' || unit.type === 'typescript-build') && unit.root.startsWith(dir));
+    const units = this.units.filter(unit => (unit.type === 'command' || unit.type === 'typescript-build') && isUnder(unit.root, dir));
     return units.map(u => this.lookup(u.identifier));
   }
 
@@ -90,4 +90,8 @@ export class BuildGraph {
     }
     return this.depCache.get(key)!;
   }
+}
+
+function isUnder(dir: string, root: string) {
+  return dir === root || dir.startsWith(`${root}/`) || dir.startsWith(`${root}\\`);
 }
