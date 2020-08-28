@@ -24,6 +24,7 @@ import * as log from '../lib/util/log';
 import * as yargs from 'yargs';
 
 import * as commands from '../lib/commands';
+import { SimpleError } from '../lib/util/flow';
 
 async function main() {
   const argv = yargs
@@ -69,6 +70,10 @@ async function main() {
 }
 
 main().catch(e => {
-  console.error(e);
+  if (e instanceof SimpleError) {
+    console.error(e.message);
+  } else {
+    console.error(e);
+  }
   process.exitCode = 1;
 });

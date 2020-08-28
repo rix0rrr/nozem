@@ -1,13 +1,14 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as child_process from 'child_process';
-import { promises as fs } from 'fs';
+import { promises as fs, WriteStream } from 'fs';
 import * as log from './util/log';
 import { exists, FileSet, FilePatterns, FileMatcher, copy, rimraf, ensureSymlink, ignoreEnoent, removeOldSubDirectories, findFilesUp, readJson } from './util/files';
 import * as util from 'util';
 import { cachedPromise } from './util/runtime';
 import { NozemCacheJson } from './nozem-schema';
 import { S3Cache } from './aws/s3cache';
+import { SimpleError } from './util/flow';
 
 const cpExec = util.promisify(child_process.exec);
 
@@ -147,24 +148,35 @@ export class BuildEnvironment {
     return await FileSet.fromMatcher(this.srcDir, matcher);
   }
 
-  public async execute(command: string, env: Record<string, string>, logDir: string) {
+  public async execute(command: string, baseEnv: Record<string, string>, logDir: string) {
     log.debug(`[${this.srcDir}] ${command}`);
+
+    const env = {
+      PATH: this.binDir,
+      ...baseEnv
+    };
 
     try {
       const { stdout, stderr } = await cpExec(command, {
         cwd: this.srcDir,
-        env: {
-          PATH: this.binDir,
-          ...env
-        }
+        env,
       });
 
       await fs.writeFile(path.join(logDir, 'stdout.log'), stdout, { encoding: 'utf-8' });
       await fs.writeFile(path.join(logDir, 'stderr.log'), stderr, { encoding: 'utf-8' });
     } catch (e) {
+      await flush(process.stdout);
+      process.stderr.write(`cmd:  ${command}\n`);
+      process.stderr.write(`cwd:  ${this.srcDir}\n`);
+      process.stderr.write(`env:  ${Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ')}\n`);
+      process.stderr.write(`exit: ${e.code}\n`);
       if (e.stdout) { process.stderr.write(e.stdout); }
       if (e.stderr) { process.stderr.write(e.stderr); }
-      throw e;
+      await flush(process.stderr);
+
+      // The default error, when printed, will contain all stdout/stderr again. Replace it
+      // with an Error that's easier on the eyes.
+      throw new SimpleError(e.message.split('\n')[0]);
     }
   }
 
@@ -254,4 +266,11 @@ export class BuildOutput {
 
 function slugify(x: string) {
   return x.replace(/[^a-zA-Z0-9!$@.-]/g, '-');
+}
+
+async function flush(s: NodeJS.WriteStream) {
+  const flushed = s.write('');
+  if (!flushed) {
+    return new Promise(ok => s.once('drain', ok));
+  }
 }
