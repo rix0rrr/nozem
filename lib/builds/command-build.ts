@@ -61,7 +61,7 @@ export class CommandBuildStrategy implements IBuildStrategy {
     if (this.def.buildCommand) {
       try {
         await env.execute(this.def.buildCommand, {
-          NZM_PACKAGE_SOURCE: path.resolve(this.def.root),
+          NZM_PACKAGE_SOURCE: path.resolve(this.root, this.def.root),
           ...this.translateEnvVars(this.def.env),
         }, env.root);
       } catch (e) {
