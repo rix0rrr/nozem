@@ -46,7 +46,8 @@ async function main() {
     .command('from-lerna', 'Extract a nozem build model from a Lerna monorepo structure')
     .command('build [TARGET..]', 'Build targets', command => command
       .option('bail', { alias: 'b', type: 'boolean', default: true })
-      .positional('TARGET', { type: 'string', array: true, describe: 'Packages to build, default all' })
+      .option('down', { alias: 'd', type: 'boolean', default: false, description: 'Include targets downstream from requested build targets' })
+      .positional('TARGET', { type: 'string', array: true, describe: 'Packages or directories to build, default all' })
     )
     .demandCommand()
     .help()
@@ -63,8 +64,9 @@ async function main() {
     case 'build':
       return await commands.build({
         concurrency: argv.concurrency,
-        targets: argv.TARGET,
+        targets: argv.TARGET ?? [],
         bail: argv.bail,
+        downstream: argv.down,
       });
   }
 }

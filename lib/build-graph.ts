@@ -1,21 +1,18 @@
 import * as path from 'path';
-import { promises as fs } from 'fs';
 import * as log from './util/log';
-import { TsconfigJson } from './file-schemas';
-import { FileSet, FilePatterns, standardHash, readJson, writeJson } from './util/files';
 import { Graph } from './util/graph';
-import { IBuildDependency, IUnboundBuildDependency, createDependency } from './deps';
+import { IUnboundBuildDependency, createDependency } from './deps';
 import { UnitDefinition, BuildDepSpec, depSpecRepr } from './nozem-schema';
 import { BuildNode } from './build-node';
-import { BuildQueue } from './build-queue';
 import { createStrategy } from './builds';
+import { exists } from './util/files';
 
 export class BuildGraph {
   public readonly graph = new Graph<BuildNode>();
   private readonly ids = new Map<string, BuildNode>();
   private readonly depCache = new Map<string, IUnboundBuildDependency>();
 
-  constructor(private readonly units: UnitDefinition[]) {
+  constructor(private readonly rootDirectory: string, private readonly units: UnitDefinition[]) {
   }
 
   public async build() {
@@ -53,6 +50,36 @@ export class BuildGraph {
     const nodes = targets.map(t => this.lookup(t));
     const incomingClosure = this.graph.feedsInto(...nodes);
     return this.graph.subgraph(incomingClosure);
+  }
+
+  public async selectTargets(targets: string[], downstream: boolean) {
+    const nodes = new Array<BuildNode>();
+    const msg = [];
+    for (const target of targets) {
+      if (exists(target, s => s.isDirectory())) {
+        const fullDir = path.resolve(target);
+        const relDir = path.relative(this.rootDirectory, fullDir);
+        msg.push(`nodes under '${fullDir}'`);
+        nodes.push(...this.nodesUnderDir(relDir));
+      } else {
+        msg.push(target);
+        nodes.push(this.lookup(target));
+      }
+    }
+    if (downstream) {
+      msg.push('and downstream dependencies');
+    }
+
+    log.info(`Selecting ${msg.join(', ')}.`);
+    return this.graph.subgraph([
+      ...this.graph.feedsInto(...nodes),
+      ...downstream ? this.graph.reachableFrom(...nodes) : [],
+    ]);
+  }
+
+  private nodesUnderDir(dir: string) {
+    const units = this.units.filter(unit => (unit.type === 'command' || unit.type === 'typescript-build') && unit.root.startsWith(dir));
+    return units.map(u => this.lookup(u.identifier));
   }
 
   private makeDependency(dep: BuildDepSpec): IUnboundBuildDependency {

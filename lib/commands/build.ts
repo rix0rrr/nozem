@@ -1,26 +1,42 @@
+import * as path from 'path';
 import * as log from '../util/log';
 import { BuildGraph } from "../build-graph";
 import { NozemJson } from '../nozem-schema';
 import { BuildWorkspace } from '../build-tools';
-import { readJson } from '../util/files';
+import { readJson, findFileUp } from '../util/files';
 import { BuildQueue } from '../build-queue';
 import { S3Cache } from '../aws/s3cache';
+import { SimpleError } from '../util/flow';
 
 export interface BuildOptions {
   readonly concurrency?: number;
-  readonly targets?: string[];
+  readonly targets: string[];
   readonly bail?: boolean;
+  readonly downstream?: boolean;
 }
 
-export async function build(options: BuildOptions = {}) {
-  const nozemJson: NozemJson = await readJson('nozem.json');
+export async function build(options: BuildOptions) {
+  const nozemJsonFile = await findFileUp('nozem.json', process.cwd());
+  if (nozemJsonFile === undefined) {
+    throw new SimpleError(`'nozem.json' not found upwards from '${process.cwd()}'`);
+  }
 
-  const buildGraph = new BuildGraph(nozemJson.units);
+  const nozemJsonDir = path.dirname(path.resolve(nozemJsonFile));
+  const nozemJson: NozemJson = await readJson(nozemJsonFile);
+
+  const buildGraph = new BuildGraph(nozemJsonDir, nozemJson.units);
   await buildGraph.build();
 
-  const workspace = await BuildWorkspace.detectConfiguration('.');
+  const workspace = await BuildWorkspace.detectConfiguration(nozemJsonDir);
 
-  const targetGraph = (options.targets ?? []).length > 0 ? buildGraph.incomingClosure(options.targets!) : buildGraph.graph;
+  let targetGraph;
+  if (options.targets.length === 0 && process.cwd() === nozemJsonDir) {
+    // Build everything, even targets that may not have an associated directory
+    targetGraph = buildGraph.graph;
+  } else {
+    targetGraph = await buildGraph.selectTargets(options.targets.length > 0 ? options.targets : ['.'], !!options.downstream)
+  }
+
   const queue = new BuildQueue(targetGraph, {
     concurrency: options.concurrency || 4,
     bail: options.bail,

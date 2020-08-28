@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { promises as fs, Stats } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as log from './log';
@@ -259,10 +259,10 @@ export function standardHash() {
   return crypto.createHash('sha1');
 }
 
-export async function exists(s: string) {
+export async function exists(s: string, cb?: (s: Stats) => boolean) {
   try {
-    await fs.lstat(s);
-    return true;
+    const st = await fs.lstat(s);
+    return cb === undefined || cb(st);
   } catch (e) {
     if (e.code === 'ENOENT') { return false; }
     throw e;
@@ -325,6 +325,19 @@ export async function removeOldSubDirectories(n: number, dirName: string) {
   });
 }
 
+/**
+ * Find the most specific file with the given name up from the startin directory
+ */
+export async function findFileUp(filename: string, startDir: string, rootDir?: string): Promise<string | undefined> {
+  const ret = await findFilesUp(filename, startDir, rootDir);
+  return ret.length > 0 ? ret.pop() : undefined;
+}
+
+/**
+ * Find all files with the given name up from the starting directory
+ *
+ * Returns the most specific file at the end.
+ */
 export async function findFilesUp(filename: string, startDir: string, rootDir?: string): Promise<string[]> {
   const ret = new Array<string>();
 

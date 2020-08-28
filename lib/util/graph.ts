@@ -66,7 +66,7 @@ export class Graph<A> {
   public subgraph(nodes: A[]) {
     const ns = new Set(nodes);
     const ret = new Graph<A>();
-    ret.addNode(...nodes);
+    ret.addNode(...ns);
     for (const [from, to] of this.edges()) {
       if (ns.has(from) && ns.has(to)) {
         ret.addEdge(from, to);
