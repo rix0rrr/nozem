@@ -1,10 +1,10 @@
 import * as path from 'path';
-import { promises as fs } from 'fs';
 import * as log from '../util/log';
 
 import { PackageJson, LernaJson } from '../file-schemas';
 import { writeJson, readJson, exists, globMany, findFilesUp } from '../util/files';
 import { UnitDefinition, NozemJson, InternalNpmDepSpec, NpmDepSpec, CopyDepSpec, BuildDepSpec, depSpecRepr, OsDepSpec } from '../nozem-schema';
+import { combinedGitIgnores, loadPatternFiles } from '../util/ignorefiles';
 
 export async function fromLerna() {
   const analyzer = new MonoRepoAnalyzer();
@@ -74,7 +74,7 @@ export class MonoRepoAnalyzer {
       ...dependencies.externalDependencies
     ];
 
-    const nonSources = await combinedGitIgnores(root, workspaceRoot);
+    const nonSources = await combinedGitIgnores(root);
     const nonArtifacts = await loadPatternFiles(path.join(root, '.npmignore'));
 
     // Build job
@@ -252,36 +252,6 @@ async function findPackageDirectory(packageName: string, root: string): Promise<
     }
     dir = next;
   }
-}
-
-/**
- * Load a set of pattern files, from the least specific to the most specific
- */
-async function loadPatternFiles(...files: string[]) {
-  const ret = new Array<string>();
-  for (const file of files) {
-    try {
-      const lines = (await fs.readFile(file, { encoding: 'utf-8' })).split('\n');
-
-      const importantLines = lines
-        .map(l => l.trim())
-        .filter(l => l) // Nonempty
-        .filter(l => !l.startsWith('#')) // # are comment lines
-        // If a '/' occurs anywhere except at the most specific file, the pattern cannot be inherited
-        .filter(l => [l.length - 1, -1].includes(l.indexOf('/')) || file === files[files.length - 1]);
-
-      // Add at the start, move upward
-      ret.push(...importantLines);
-    } catch (e) {
-      if (e.code !== 'ENOENT') { throw e; }
-    }
-  }
-  return ret;
-}
-
-async function combinedGitIgnores(buildDir: string, rootDir: string) {
-  const gitIgnores = await findFilesUp('.gitignore', buildDir, rootDir);
-  return loadPatternFiles(...gitIgnores);
 }
 
 function removeDuplicateDependencies(ret: BuildDepSpec[]) {

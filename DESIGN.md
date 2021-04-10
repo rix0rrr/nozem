@@ -8,7 +8,7 @@ that actually impact the result of the build.
 SourceHash and OutHash
 ----------------------
 
-For example, in the package graph:
+For example, the package graph:
 
 ```
 ┌────────┐            ┌────────┐
@@ -16,6 +16,19 @@ For example, in the package graph:
 │   P1   │───────────▶│   P2   │
 │        │            │        │
 └────────┘            └────────┘
+```
+
+Actually lookes like this at the file level:
+
+```
+                  ┌────────────┐                          ┌────────────┐
+ .─────────.      │            │     .─────────────.      │            │     .─────────────.
+( p1 source )────▶│  p1 build  │───▶( p1 artifacts  )─┬──▶│  p2 build  │───▶( p2 artifacts  )
+ `─────────'      │            │     `─────────────'  │   │            │     `─────────────'
+                  └────────────┘                      │   └────────────┘
+                                     .─────────────.  │
+                                    (   p2 source   )─┘
+                                     `─────────────'
 ```
 
 The SOURCES of P1 may have changed, but that doesn't mean its build OUTPUT will

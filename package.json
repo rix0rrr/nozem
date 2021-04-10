@@ -2,7 +2,7 @@
   "name": "nozem",
   "version": "0.4.6",
   "description": "",
-  "main": "index.js",
+  "main": "dist/lib/index.js",
   "directories": {
     "lib": "lib"
   },

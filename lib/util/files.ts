@@ -20,6 +20,11 @@ export class FileSet {
     return FileSet.fromMatcher(root, ALL_FILES_MATCHER);
   }
 
+  public static fromDirectoryWithIgnores(root: string, ignorePatterns: string[]) {
+    const ignorePattern = new FilePatterns(ignorePatterns);
+    return FileSet.fromMatcher(root, ignorePattern.toComplementaryMatcher());
+  }
+
   constructor(public readonly root: string, public readonly fileNames: string[]) {
     this.fileNames.sort();
   }
@@ -329,6 +334,16 @@ export async function removeOldSubDirectories(n: number, dirName: string) {
   });
 }
 
+export async function pathExists(f: string) {
+  try {
+    await fs.stat(f);
+    return true;
+  } catch (e) {
+    if (e.code === 'ENOENT') { return false; }
+    throw e;
+  }
+}
+
 /**
  * Find the most specific file with the given name up from the startin directory
  */
@@ -342,11 +357,15 @@ export async function findFileUp(filename: string, startDir: string, rootDir?: s
  *
  * Returns the most specific file at the end.
  */
-export async function findFilesUp(filename: string, startDir: string, rootDir?: string): Promise<string[]> {
+export async function findFilesUp(filename: string, startDir: string, isRootDir?: string | ((x: string) => Promise<boolean>)): Promise<string[]> {
   const ret = new Array<string>();
 
   startDir = path.resolve(startDir);
-  rootDir = rootDir ? path.resolve(rootDir) : undefined;
+
+  if (typeof isRootDir === 'string') {
+    const resolvedRoot = path.resolve(isRootDir);
+    isRootDir = (x: string) => Promise.resolve(x === resolvedRoot);
+  }
 
   let currentDir = startDir;
   while (true) {
@@ -355,7 +374,7 @@ export async function findFilesUp(filename: string, startDir: string, rootDir?: 
       ret.push(fullPath);
     }
 
-    if (currentDir === rootDir) { break; }
+    if (isRootDir && await isRootDir(currentDir)) { break; }
     const next = path.dirname(currentDir);
     if (next === currentDir) { break; }
     currentDir = next;
