@@ -5,7 +5,7 @@ export function flatMap<A, B>(xs: A[], fn: (x: A) => B[]): B[] {
 /**
  * Cache the promise, not the value, so that we don't start the computation twice.
  */
-export function cachedPromise<A>(obj: any, key: symbol, fn: () => Promise<A>): Promise<A> {
+export function cachedPromise<A>(obj: any, key: symbol | string, fn: () => Promise<A>): Promise<A> {
   if (!(key in obj)) {
     obj[key] = fn();
   }

@@ -5,6 +5,7 @@ import { PackageJson, LernaJson } from '../file-schemas';
 import { writeJson, readJson, exists, globMany, findFilesUp } from '../util/files';
 import { UnitDefinition, NozemJson, InternalNpmDepSpec, NpmDepSpec, CopyDepSpec, BuildDepSpec, depSpecRepr, OsDepSpec } from '../nozem-schema';
 import { combinedGitIgnores, loadPatternFiles } from '../util/ignorefiles';
+import { findNpmPackage } from '../util/npm';
 
 export async function fromLerna() {
   const analyzer = new MonoRepoAnalyzer();
@@ -203,7 +204,7 @@ export class MonoRepoAnalyzer {
       if (repoPackage) {
         repoDependencies.push(pjDep);
       } else {
-        const resolvedLocation = path.relative(workspaceRoot, await findPackageDirectory(pjDep.name, packageDir));
+        const resolvedLocation = path.relative(workspaceRoot, await findNpmPackage(pjDep.name, packageDir));
 
         externalDependencies.push({
           type: 'npm',
@@ -236,22 +237,6 @@ interface PackageJsonDependency {
   readonly name: string;
   readonly versionRange: string;
   readonly dependencyType: 'dev' | 'runtime';
-}
-
-async function findPackageDirectory(packageName: string, root: string): Promise<string> {
-  let dir = root;
-  while (true) {
-    const loc = path.join(dir, 'node_modules', packageName);
-    if (await exists(path.join(loc, 'package.json'))) {
-      return loc;
-    }
-
-    const next = path.dirname(dir);
-    if (next === dir) {
-      throw new Error(`Could not find node package ${packageName} starting at ${root}`);
-    }
-    dir = next;
-  }
 }
 
 function removeDuplicateDependencies(ret: BuildDepSpec[]) {

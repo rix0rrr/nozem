@@ -55,7 +55,9 @@ export class NpmDependency implements IInput {
   }
 }
 
+/*
 "@types/fs-extra": "^8.1.1",
 "cdk-build-tools": "0.0.0",
 "fs-extra": "^9.0.1",
 "pkglint": "0.0.0"
+*/

@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as log from './log';
 import { cachedPromise, escapeRegExp } from './runtime';
+import { combinedGitIgnores } from './ignorefiles';
 
 const hashSym = Symbol();
 
@@ -10,6 +11,10 @@ const hashSym = Symbol();
  * A set of files, relative to a directory
  */
 export class FileSet {
+  public static async fromGitignored(root: string) {
+    return await FileSet.fromDirectoryWithIgnores(root, await combinedGitIgnores(root));
+  }
+
   public static async fromMatcher(root: string, matcher: FileMatcher) {
     const files = new Array<string>();
     await walkFiles(root, matcher, async (f) => { files.push(f); });
@@ -43,10 +48,17 @@ export class FileSet {
     }
   }
 
-  public async copyTo(targetDir: string) {
-    return promiseAllBatch(8, this.fileNames.map((f) => () => copy(
+  public async copyTo(targetDir: string): Promise<FileSet> {
+    await promiseAllBatch(8, this.fileNames.map((f) => () => copy(
         path.join(this.root, f),
         path.join(targetDir, f))));
+
+    return new FileSet(targetDir, this.fileNames);
+  }
+
+  public except(rhs: FileSet) {
+    const ignorePaths = new Set(rhs.fileNames);
+    return new FileSet(this.root, this.fileNames.filter(f => !ignorePaths.has(f)));
   }
 
   public async hash() {
@@ -68,21 +80,33 @@ export class FileSet {
   }
 
   public async fileHashes() {
-    return (await promiseAllBatch(8, this.fileNames.map((file) => async () => {
+    return (await promiseAllBatch(4, this.fileNames.map((file) => async () => {
       const fullPath = path.join(this.root, file);
       return `${file}\n${await fileHash(fullPath)}\n`;
     }))).join('');
   }
 }
 
+const hashCache = new Map<string, string>();
+
 async function fileHash(fullPath: string) {
+  /*
+  const existing = hashCache.get(fullPath);
+  if (existing) { return existing; }
+  */
+
+  const stats = await fs.lstat(fullPath);
   const hash = standardHash();
-  if ((await fs.lstat(fullPath)).isSymbolicLink()) {
+  if (stats.isSymbolicLink()) {
     hash.update(await fs.readlink(fullPath));
   } else {
     hash.update(await fs.readFile(fullPath));
   }
-  return hash.digest('hex');
+  const ret = hash.digest('hex');
+  /*
+  hashCache.set(fullPath, ret);
+  */
+  return ret;
 }
 
 export interface FileMatcher {
