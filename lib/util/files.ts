@@ -7,12 +7,22 @@ import { combinedGitIgnores } from './ignorefiles';
 
 const hashSym = Symbol();
 
+export interface FileSetSchema {
+  readonly relativePaths: string[];
+}
+
 /**
  * A set of files, relative to a directory
  */
 export class FileSet {
-  public static async fromGitignored(root: string) {
-    return await FileSet.fromDirectoryWithIgnores(root, await combinedGitIgnores(root));
+  public static fromSchema(dir: string, schema: FileSetSchema) {
+    return new FileSet(dir, schema.relativePaths);
+  }
+
+  public static async fromGitignored(root: string, extraIgnores?: string[]) {
+    const ignores = await combinedGitIgnores(root);
+    ignores.push(...extraIgnores ?? []);
+    return await FileSet.fromDirectoryWithIgnores(root, ignores);
   }
 
   public static async fromMatcher(root: string, matcher: FileMatcher) {
@@ -53,7 +63,11 @@ export class FileSet {
         path.join(this.root, f),
         path.join(targetDir, f))));
 
-    return new FileSet(targetDir, this.fileNames);
+    return this.rebase(targetDir);
+  }
+
+  public rebase(newDirectory: string) {
+    return new FileSet(newDirectory, this.fileNames);
   }
 
   public except(rhs: FileSet) {
@@ -77,6 +91,12 @@ export class FileSet {
 
       return d.digest('hex');
     });
+  }
+
+  public toSchema(): FileSetSchema {
+    return {
+      relativePaths: this.fileNames,
+    };
   }
 
   public async fileHashes() {
@@ -318,13 +338,28 @@ export async function rimraf(x: string) {
   }
 }
 
-export async function ensureSymlink(target: string, filePath: string) {
+export async function ensureSymlink(target: string, filePath: string, overwrite?: boolean) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.symlink(target, filePath);
+  try {
+    await fs.symlink(target, filePath);
+  } catch (e) {
+    if (e.code !== 'EEXIST') { throw e; }
+    await fs.unlink(filePath);
+    await fs.symlink(target, filePath);
+  }
 }
 
 export async function readJson(filename: string) {
   return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+}
+
+export async function readJsonIfExists(filename: string): Promise<any | undefined> {
+  try {
+    return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+  } catch (e) {
+    if (e.code === 'ENOENT') { return undefined; }
+    throw e;
+  }
 }
 
 export async function writeJson(filename: string, obj: any) {

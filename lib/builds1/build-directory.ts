@@ -18,7 +18,7 @@ export class BuildDirectory {
   public static async with<A>(fn: (x: BuildDirectory) => A|Promise<A>): Promise<A> {
     const be = await BuildDirectory.make();
     try {
-      return fn(be);
+      return await fn(be);
     } finally {
       await be.cleanup();
     }
@@ -38,12 +38,13 @@ export class BuildDirectory {
     await rimraf(this.directory);
   }
 
-  public async installExecutable(absTarget: string, binName?: string) {
+  public async installExecutable(absTarget: string, binName?: string, overwrite?: boolean) {
     const targetPath = path.join(this.binDir, binName ?? path.basename(absTarget));
     try {
       await ensureSymlink(
         absTarget,
-        targetPath);
+        targetPath,
+        overwrite);
     } catch (e) {
       throw new Error(`Error symlinking ${absTarget} -> ${targetPath}: ${e.message}`);
     }

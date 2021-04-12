@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-import * as path from 'path';
 import { NpmPackageBuild } from '../lib/builds1/npm-package-build';
-import { SourceInput } from '../lib/inputs/input-source';
-import { FileSet, readJson, standardHash } from '../lib/util/files';
 import { SimpleError } from '../lib/util/flow';
-import { findNpmPackage, npmDependencies, readPackageJson } from '../lib/util/npm';
-import { cachedPromise } from '../lib/util/runtime';
+import { setVerbose } from '../lib/util/log';
 
 async function main() {
+  setVerbose(true);
   const build = await NpmPackageBuild.fromCache(process.cwd());
   await build.build();
 }
