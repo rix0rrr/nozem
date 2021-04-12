@@ -109,7 +109,7 @@ export class FileSet {
 
 const hashCache = new Map<string, string>();
 
-async function fileHash(fullPath: string) {
+export async function fileHash(fullPath: string) {
   /*
   const existing = hashCache.get(fullPath);
   if (existing) { return existing; }

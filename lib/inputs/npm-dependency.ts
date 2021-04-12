@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { BuildDirectory } from '../builds1/build-directory';
 import { NpmPackageBuild } from '../builds1/npm-package-build';
+import { Workspace } from '../builds1/workspace';
 import { PackageJson } from '../file-schemas';
 import { FileSet, standardHash } from '../util/files';
 import { debug } from '../util/log';
@@ -16,7 +17,7 @@ const sourcesSym = Symbol();
 type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
 
 export abstract class NpmDependencyInput implements IBuildInput {
-  public static async fromDirectory(packageDirectory: string, alreadyIncluded?: string[]) {
+  public static async fromDirectory(workspace: Workspace, packageDirectory: string, alreadyIncluded?: string[]) {
     return cachedPromise(objectCache, packageDirectory, async () => {
       const packageJson = await readPackageJson(packageDirectory);
 
@@ -28,11 +29,11 @@ export abstract class NpmDependencyInput implements IBuildInput {
         }
 
         const found = await findNpmPackage(name, packageDirectory);
-        trans[name] = NpmDependencyInput.fromDirectory(found, [...alreadyIncluded ?? [], name]);
+        trans[name] = NpmDependencyInput.fromDirectory(workspace, found, [...alreadyIncluded ?? [], name]);
       }
 
       return isMonoRepoPackage(packageDirectory)
-        ? new MonoRepoBuildDependencyInput(packageDirectory, packageJson, trans, await NpmPackageBuild.fromCache(packageDirectory))
+        ? new MonoRepoBuildDependencyInput(packageDirectory, packageJson, trans, await workspace.npmPackageBuild(packageDirectory))
         : new NpmRepoDependencyInput(packageDirectory, packageJson, trans);
     });
   }

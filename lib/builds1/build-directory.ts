@@ -25,7 +25,7 @@ export class BuildDirectory {
   }
 
   public readonly binDir: string;
-  public readonly srcDir: string;
+  public srcDir: string;
 
   constructor(
     public readonly directory: string,
@@ -36,6 +36,15 @@ export class BuildDirectory {
 
   public async cleanup() {
     await rimraf(this.directory);
+  }
+
+  /**
+   * Add a subdirectory to the srcDir and move the srcDir there
+   */
+  public async moveSrcDir(relativePath: string) {
+    const newSrcDir = path.join(this.srcDir, relativePath);
+    await fs.mkdir(newSrcDir, { recursive: true });
+    this.srcDir = newSrcDir;
   }
 
   public async installExecutable(absTarget: string, binName?: string, overwrite?: boolean) {

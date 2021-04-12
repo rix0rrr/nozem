@@ -2,15 +2,15 @@ import * as path from 'path';
 import { PackageJson } from "../file-schemas";
 import { IBuildInput } from "../inputs/build-input";
 import { SourceInput } from "../inputs/input-source";
+import { NonPackageFileInput } from '../inputs/non-package-file';
 import { NpmDependencyInput } from "../inputs/npm-dependency";
 import { OsToolInput } from "../inputs/os-tool-input";
-import { FileSet, FileSetSchema, readJson, readJsonIfExists, standardHash, writeJson } from "../util/files";
+import { FileSet, FileSetSchema, readJsonIfExists, standardHash, writeJson } from "../util/files";
 import { debug, info } from "../util/log";
 import { findNpmPackage, npmDependencies, readPackageJson } from "../util/npm";
 import { cachedPromise, partition } from "../util/runtime";
 import { BuildDirectory } from "./build-directory";
-
-const buildCache = new Map<string, NpmPackageBuild>();
+import { Workspace } from './workspace';
 
 const artifactsCacheSymbol = Symbol();
 const inputHashCacheSymbol = Symbol();
@@ -23,26 +23,16 @@ export interface BuildCacheSchema {
 }
 
 export class NpmPackageBuild {
-  public static async fromCache(dir: string): Promise<NpmPackageBuild> {
-    // Builds are memoized because there is a lot of package reuse in the tree.
-    const existing = buildCache.get(dir);
-    if (existing) { return existing; }
-
-    const build = await NpmPackageBuild.fromDirectory(dir);
-    buildCache.set(dir, build);
-    return build;
-  }
-
-  public static async fromDirectory(dir: string): Promise<NpmPackageBuild> {
+  public static async fromDirectory(dir: string, workspace: Workspace): Promise<NpmPackageBuild> {
     const pj = await readPackageJson(dir);
 
     const inputs: Record<string, IBuildInput> = {};
-    const sources = await FileSet.fromGitignored(dir);
+    const sources = await FileSet.fromGitignored(dir, ['.nzm-*']);
     inputs.source = new SourceInput(sources);
 
     for (const dep of npmDependencies(pj)) {
       const found = await findNpmPackage(dep, dir);
-      inputs[`dep_${dep}`] = await NpmDependencyInput.fromDirectory(found);
+      inputs[`dep_${dep}`] = await NpmDependencyInput.fromDirectory(workspace, found);
     }
 
     // NPM packages always need node
@@ -52,10 +42,20 @@ export class NpmPackageBuild {
       inputs[`os_${name}`] = await OsToolInput.fromExecutable(name);
     }
 
-    return new NpmPackageBuild(dir, pj, sources, inputs);
+    // External files
+    for (const file of pj.nozem?.nonPackageFiles ?? []) {
+      inputs[`ext_${file}`] = new NonPackageFileInput(dir, file);
+    }
+
+    return new NpmPackageBuild(workspace, dir, pj, sources, inputs);
   }
 
-  constructor(public readonly directory: string, public readonly packageJson: PackageJson, private readonly sources: FileSet, private readonly inputs: Record<string, IBuildInput>) {
+  constructor(
+    private readonly workspace: Workspace,
+    public readonly directory: string,
+    public readonly packageJson: PackageJson,
+    private readonly sources: FileSet,
+    private readonly inputs: Record<string, IBuildInput>) {
   }
 
   public async inputHash() {
@@ -92,6 +92,9 @@ export class NpmPackageBuild {
 
   public async doBuild(): Promise<FileSet> {
     return BuildDirectory.with(async (buildDir) => {
+      // Mirror the monorepo directory structure inside the build dir
+      await buildDir.moveSrcDir(this.workspace.relativePath(this.directory));
+
       await this.installDependencies(buildDir, Object.values(this.inputs));
 
       info(`building ${this.packageJson.name}`);
