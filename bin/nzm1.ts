@@ -22,7 +22,7 @@ async function main() {
     throw new SimpleError('Cowardly refusing to build workspace root: run this from a package directory');
   }
 
-  const ws = new Workspace(workspaceRoot);
+  const ws = await Workspace.fromDirectory(workspaceRoot);
   const build = await ws.npmPackageBuild(curDir);
   await build.build();
 }

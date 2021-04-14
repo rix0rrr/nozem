@@ -6,6 +6,7 @@ import { copy, ensureSymlink, FileMatcher, FileSet, rimraf } from '../util/files
 import { SimpleError } from '../util/flow';
 import * as log from '../util/log';
 import * as util from 'util';
+import { relative } from 'path';
 
 const cpExec = util.promisify(child_process.exec);
 
@@ -45,6 +46,19 @@ export class BuildDirectory {
     const newSrcDir = path.join(this.srcDir, relativePath);
     await fs.mkdir(newSrcDir, { recursive: true });
     this.srcDir = newSrcDir;
+  }
+
+  public async touchFile(relativePath: string) {
+    const ts = new Date();
+    const absPath = path.join(this.srcDir, relativePath);
+    try {
+      await fs.mkdir(path.dirname(absPath), { recursive: true });
+      await fs.utimes(absPath, ts, ts);
+    } catch (e) {
+      if (e.code !== 'ENOENT') { throw e; }
+
+      await fs.writeFile(absPath, '');
+    }
   }
 
   public async installExecutable(absTarget: string, binName?: string, overwrite?: boolean) {

@@ -350,7 +350,11 @@ export async function ensureSymlink(target: string, filePath: string, overwrite?
 }
 
 export async function readJson(filename: string) {
-  return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+  try {
+    return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+  } catch (e) {
+    throw new Error(`While reading ${filename}: ${e}`);
+  }
 }
 
 export async function readJsonIfExists(filename: string): Promise<any | undefined> {

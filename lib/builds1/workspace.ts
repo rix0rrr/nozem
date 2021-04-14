@@ -1,10 +1,18 @@
 import * as path from 'path';
+import { PackageJson } from '../file-schemas';
+import { exists } from '../util/files';
+import { readPackageJson } from '../util/npm';
 import { NpmPackageBuild } from './npm-package-build';
 
 export class Workspace {
   private packageBuildCache = new Map<string, NpmPackageBuild>();
 
-  constructor(public readonly root: string) {
+  public static async fromDirectory(root: string) {
+    const pj = await exists(path.join(root, 'package.json')) ? await readPackageJson(root) : undefined;
+    return new Workspace(root, pj);
+  }
+
+  constructor(public readonly root: string, private readonly packageJson: PackageJson | undefined) {
   }
 
   public relativePath(absPath: string) {
@@ -21,4 +29,7 @@ export class Workspace {
     return build;
   }
 
+  public absoluteGlobalNonPackageFiles(relativeToDir: string): string[] {
+    return (this.packageJson?.nozem?.globalNonPackageFiles ?? []).map(p => path.relative(relativeToDir, path.join(this.root, p)));
+  }
 }

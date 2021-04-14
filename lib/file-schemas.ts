@@ -27,6 +27,7 @@ export interface PackageJson {
 export interface PjNozemOptions {
   readonly ostools?: string[];
   readonly nonPackageFiles?: string[];
+  readonly globalNonPackageFiles?: string[];
   readonly copyAllSourcesForTest?: boolean;
   readonly skipTsApiOptimization?: boolean;
 }

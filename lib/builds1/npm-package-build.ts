@@ -46,6 +46,9 @@ export class NpmPackageBuild {
     for (const file of pj.nozem?.nonPackageFiles ?? []) {
       inputs[`ext_${file}`] = new NonPackageFileInput(dir, file);
     }
+    for (const file of workspace.absoluteGlobalNonPackageFiles(dir)) {
+      inputs[`ext_${file}`] = new NonPackageFileInput(dir, file);
+    }
 
     return new NpmPackageBuild(workspace, dir, pj, sources, inputs);
   }
@@ -92,6 +95,9 @@ export class NpmPackageBuild {
 
   public async doBuild(): Promise<FileSet> {
     return BuildDirectory.with(async (buildDir) => {
+      // Create a file so that pkglint can find the root (because 'lerna.json' might not be there)
+      await buildDir.touchFile('.nzmroot');
+
       // Mirror the monorepo directory structure inside the build dir
       await buildDir.moveSrcDir(this.workspace.relativePath(this.directory));
 
