@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { x } from 'tar';
 import { PackageJson } from "../file-schemas";
 import { IBuildInput } from "../inputs/build-input";
 import { SourceInput } from "../inputs/input-source";
@@ -23,6 +24,11 @@ export interface BuildCacheSchema {
 }
 
 export class NpmPackageBuild {
+  /**
+   * Serves as a cache buster when something about the build logic changes
+   */
+  private static logicVersion = 1;
+
   public static async fromDirectory(dir: string, workspace: Workspace): Promise<NpmPackageBuild> {
     const pj = await readPackageJson(dir);
 
@@ -64,6 +70,7 @@ export class NpmPackageBuild {
   public async inputHash() {
     return cachedPromise(this, inputHashCacheSymbol, async () => {
       const inputHash = standardHash();
+      inputHash.update(`version:${NpmPackageBuild.logicVersion}\n`);
       for (const [k, v] of Object.entries(this.inputs)) {
         inputHash.update(`${k}:${await v.hash()}\n`);
       }
@@ -126,7 +133,12 @@ export class NpmPackageBuild {
       // (will hash+copy more files than necessary, but oh well)
 
       // Everything that's new in the srcDir is an artifact
-      return builtFiles.rebase(this.directory);
+
+      // We make an exception for .ts files that have a corresponding .d.ts file.
+      // If we include the .ts file then downstream TypeScript compiler will prefer
+      // the .ts files but they will reference types from devDependencies which may not
+      // be available.
+      return stripTypescriptSources(builtFiles.rebase(this.directory));
     });
   }
 
@@ -152,4 +164,28 @@ export class NpmPackageBuild {
 
 function isNpmDependency(x: IBuildInput): x is NpmDependencyInput {
   return x instanceof NpmDependencyInput;
+}
+
+/**
+ * Strip files that will mess up downstream TypeScript compilation
+ */
+function stripTypescriptSources(fs: FileSet) {
+  return fs.filter(not(f =>
+    // .ts file for which a .d.ts file also exists
+    (isTypescriptSourceFile(f) && fs.fileNames.includes(makeTypescriptDeclarationFile(f)))
+    // tsconfig but only in the root
+    || (f == 'tsconfig.json')
+  ));
+}
+
+function makeTypescriptDeclarationFile(x: string) {
+  return x.replace(/\.ts$/, '.d.ts');
+}
+
+function isTypescriptSourceFile(x: string) {
+  return x.endsWith('.ts') && !x.endsWith('.d.ts');
+}
+
+function not<A>(fn: (x: A) => boolean): (x: A) => boolean {
+  return (x) => !fn(x);
 }

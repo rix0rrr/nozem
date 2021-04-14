@@ -93,6 +93,10 @@ export class FileSet {
     });
   }
 
+  public filter(pred: (x: string) => boolean): FileSet {
+    return new FileSet(this.root, this.fileNames.filter(pred));
+  }
+
   public toSchema(): FileSetSchema {
     return {
       relativePaths: this.fileNames,
@@ -329,6 +333,7 @@ export async function rimraf(x: string) {
       for (const child of await fs.readdir(x)) {
         await rimraf(path.join(x, child));
       }
+      await fs.rmdir(x);
     } else {
       await fs.unlink(x);
     }

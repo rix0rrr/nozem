@@ -142,7 +142,7 @@ class MonoRepoBuildDependencyInput extends NpmDependencyInput {
       super(packageDirectory, packageJson, transitiveDeps);
   }
 
-  public files() {
+  public async files() {
     return this.build.build();
   }
 
