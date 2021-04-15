@@ -14,6 +14,7 @@ export interface PackageJson {
   readonly dependencies?: Record<string, string>;
   readonly devDependencies?: Record<string, string>;
   readonly peerDependencies?: Record<string, string>;
+  readonly bundledDependencies?: string[];
   readonly bin?: Record<string, string> | string;
   readonly main?: string;
   readonly jsii?: any;

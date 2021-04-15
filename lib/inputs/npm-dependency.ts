@@ -80,7 +80,7 @@ export abstract class NpmDependencyInput implements IBuildInput {
   /**
    * Install hoisted
    */
-  public static async installAll(dir: BuildDirectory, npmDependencies: NpmDependencyInput[]) {
+  public static async installAll(dir: BuildDirectory, npmDependencies: NpmDependencyInput[], subdir: string = '.') {
     // Turn list into map
     const deps: PromisedDependencies = {};
     for (const dep of npmDependencies) {
@@ -91,7 +91,7 @@ export abstract class NpmDependencyInput implements IBuildInput {
     hoistDependencies(packageTree);
 
     // Install
-    await this.installDependencyTree(dir, '.', packageTree);
+    await this.installDependencyTree(dir, subdir, packageTree);
   }
 
   private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: DependencyTree) {
@@ -213,32 +213,32 @@ function hoistDependencies(packageLockDeps: Record<string, DependencyNode>) {
   }
 
   // Move the children of the parent onto the same level if there are no conflicts
-  function moveChildrenUp(parent: DependencyNode, parentContainer: Record<string, DependencyNode>) {
-    if (!parent.dependencies) { return; }
+  function moveChildrenUp(node: DependencyNode, parentDependencies: Record<string, DependencyNode>) {
+    if (!node.dependencies) { return; }
 
     // Then push packages from the mutable parent into ITS parent
-    for (const [depName, depPackage] of Object.entries(parent.dependencies)) {
-      if (!parentContainer[depName]) {
+    for (const [depName, depPackage] of Object.entries(node.dependencies)) {
+      if (!parentDependencies[depName]) {
         // It's new, we can move it up.
-        parentContainer[depName] = depPackage;
-        delete parent.dependencies[depName];
+        parentDependencies[depName] = depPackage;
+        delete node.dependencies[depName];
         didChange = true;
 
         // Recurse on the package we just moved
-        moveChildrenUp(depPackage, parentContainer);
-      } else if (parentContainer[depName].npmDependency.version === depPackage.npmDependency.version) {
+        moveChildrenUp(depPackage, parentDependencies);
+      } else if (parentDependencies[depName].npmDependency.version === depPackage.npmDependency.version) {
         // Already exists, no conflict, delete the child, no need to recurse
-        delete parent.dependencies[depName];
+        delete node.dependencies[depName];
         didChange = true;
       } else {
         // There is a conflict, leave the second package where it is, but do recurse.
-        moveChildrenUp(depPackage, parent.dependencies);
+        moveChildrenUp(depPackage, node.dependencies);
       }
     }
 
     // Cleanup for nice printing
-    if (Object.keys(parent.dependencies).length === 0) {
-      delete parent.dependencies;
+    if (Object.keys(node.dependencies).length === 0) {
+      delete node.dependencies;
       didChange = true;
     }
   }

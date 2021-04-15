@@ -2,13 +2,17 @@ export function flatMap<A, B>(xs: A[], fn: (x: A) => B[]): B[] {
   return Array.prototype.concat.apply([], xs.map(fn));
 }
 
-export function partition<A, B extends A>(xs: A[], pred: (x: A) => x is B): [B[], A[]] {
-  const yes = new Array<B>();
+export function partition<A>(xs: A[], pred: (x: A) => boolean): [A[], A[]] {
+  const yes = new Array<A>();
   const no = new Array<A>();
   for (const x of xs) {
     (pred(x) ? yes : no).push(x);
   }
   return [yes, no];
+}
+
+export function partitionT<A, B extends A>(xs: A[], pred: (x: A) => x is B): [B[], A[]] {
+  return partition(xs, pred) as any;
 }
 
 /**

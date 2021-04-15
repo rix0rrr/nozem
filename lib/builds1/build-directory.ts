@@ -6,7 +6,6 @@ import { copy, ensureSymlink, FileMatcher, FileSet, rimraf } from '../util/files
 import { SimpleError } from '../util/flow';
 import * as log from '../util/log';
 import * as util from 'util';
-import { relative } from 'path';
 
 const cpExec = util.promisify(child_process.exec);
 
@@ -134,6 +133,10 @@ export class BuildDirectory {
       // with an Error that's easier on the eyes.
       throw new SimpleError(e.message.split('\n')[0]);
     }
+  }
+
+  public relativePath(p: string) {
+    return path.relative(this.directory, p);
   }
 }
 

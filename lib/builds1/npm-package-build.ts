@@ -9,7 +9,7 @@ import { OsToolInput } from "../inputs/os-tool-input";
 import { FileSet, FileSetSchema, readJsonIfExists, standardHash, writeJson } from "../util/files";
 import { debug, info } from "../util/log";
 import { findNpmPackage, npmDependencies, readPackageJson } from "../util/npm";
-import { cachedPromise, partition } from "../util/runtime";
+import { cachedPromise, partition, partitionT } from "../util/runtime";
 import { BuildDirectory } from "./build-directory";
 import { Workspace } from './workspace';
 
@@ -149,7 +149,7 @@ export class NpmPackageBuild {
    * together.
    */
   private async installDependencies(dir: BuildDirectory, inputs: IBuildInput[]) {
-    const [npms, others] = partition(inputs, isNpmDependency);
+    const [npms, others] = partitionT(inputs, isNpmDependency);
     for (const other of others) {
       await other.install(dir);
     }
@@ -158,7 +158,16 @@ export class NpmPackageBuild {
     // 1) Optimization
     // 2) Yarn is a rat's nest of a cyclic dependencies (https://github.com/facebook/jest/issues/9712)
     //    and otherwise we'll never be able to properly install these.
-    await NpmDependencyInput.installAll(dir, npms);
+
+    // Bundled dependencies are installed into the src directory (otherwise `npm pack`
+    // would not bundle them), regular dependencies are not.
+    // Bundled dependencies still need to be hoisted, otherwise `npm-bundled` will not
+    // properly detect them.
+    const bundledDependencies = this.packageJson.bundledDependencies ?? [];
+    const [bundled, other] = partition(npms, npm => bundledDependencies.includes(npm.name));
+
+    await NpmDependencyInput.installAll(dir, bundled, dir.relativePath(dir.srcDir));
+    await NpmDependencyInput.installAll(dir, other, '.');
   }
 }
 
