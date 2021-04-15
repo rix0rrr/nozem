@@ -18,9 +18,12 @@ export class BuildDirectory {
   public static async with<A>(fn: (x: BuildDirectory) => A|Promise<A>): Promise<A> {
     const be = await BuildDirectory.make();
     try {
-      return await fn(be);
-    } finally {
+      const ret = await fn(be);
       await be.cleanup();
+      return ret;
+    } catch (e) {
+      log.warning(`Not cleaning up: ${be.directory}`);
+      throw e;
     }
   }
 
