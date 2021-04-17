@@ -1,12 +1,12 @@
 import * as path from 'path';
 import { x } from 'tar';
-import { PackageJson } from "../file-schemas";
+import { PackageJson, TsconfigJson } from "../file-schemas";
 import { IBuildInput } from "../inputs/build-input";
 import { SourceInput } from "../inputs/input-source";
 import { NonPackageFileInput } from '../inputs/non-package-file';
 import { NpmDependencyInput } from "../inputs/npm-dependency";
 import { OsToolInput } from "../inputs/os-tool-input";
-import { FileSet, FileSetSchema, readJsonIfExists, standardHash, writeJson } from "../util/files";
+import { FileSet, FileSetSchema, readJson, readJsonIfExists, standardHash, writeJson } from "../util/files";
 import { debug, info } from "../util/log";
 import { findNpmPackage, npmDependencies, readPackageJson } from "../util/npm";
 import { cachedPromise, partition, partitionT } from "../util/runtime";
@@ -112,6 +112,8 @@ export class NpmPackageBuild {
 
       info(`building ${this.packageJson.name}`);
 
+      await patchTsConfig(buildDir.srcDir);
+
       const buildCommand = this.packageJson.scripts?.build;
       if (buildCommand) {
         await buildDir.execute(buildCommand, {}, buildDir.directory);
@@ -197,4 +199,23 @@ function isTypescriptSourceFile(x: string) {
 
 function not<A>(fn: (x: A) => boolean): (x: A) => boolean {
   return (x) => !fn(x);
+}
+
+/**
+ * Patch a tsconfig file in-place, to not rely on source repo layouts anymore
+ *
+ * It's fine if `tsconfig.json` does not exist.
+ */
+async function patchTsConfig(directory: string) {
+  try {
+    const filename = path.join(directory, 'tsconfig.json');
+    const tsconfig: TsconfigJson = await readJson(filename);
+    delete tsconfig.references;
+    delete tsconfig.compilerOptions.composite;
+    delete tsconfig.compilerOptions.inlineSourceMap;
+    delete tsconfig.compilerOptions.inlineSources;
+    await writeJson(filename, tsconfig);
+  } catch (e) {
+    if (e.code !== 'ENOENT') { throw e; }
+  }
 }

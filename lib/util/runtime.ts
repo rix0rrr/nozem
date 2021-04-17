@@ -2,6 +2,14 @@ export function flatMap<A, B>(xs: A[], fn: (x: A) => B[]): B[] {
   return Array.prototype.concat.apply([], xs.map(fn));
 }
 
+export function mkdict<A>(xs: Iterable<[string, A]>): Record<string, A> {
+  const ret: Record<string, A> = {};
+  for (const [k, v] of xs) {
+    ret[k] = v;
+  }
+  return ret;
+}
+
 export function partition<A>(xs: A[], pred: (x: A) => boolean): [A[], A[]] {
   const yes = new Array<A>();
   const no = new Array<A>();

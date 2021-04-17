@@ -4,9 +4,10 @@ import { NpmPackageBuild } from '../builds1/npm-package-build';
 import { Workspace } from '../builds1/workspace';
 import { PackageJson } from '../file-schemas';
 import { FileSet, standardHash } from '../util/files';
+import { DependencyNode, hoistDependencies } from '../util/hoisting';
 import { debug } from '../util/log';
 import { findNpmPackage, npmRuntimeDependencies, readPackageJson } from '../util/npm';
-import { cachedPromise } from '../util/runtime';
+import { cachedPromise, mkdict } from '../util/runtime';
 import { IBuildInput } from './build-input';
 
 const objectCache: any = {};
@@ -29,6 +30,7 @@ export abstract class NpmDependencyInput implements IBuildInput {
         }
 
         const found = await findNpmPackage(name, packageDirectory);
+
         trans[name] = NpmDependencyInput.fromDirectory(workspace, found, [...alreadyIncluded ?? [], name]);
       }
 
@@ -94,7 +96,7 @@ export abstract class NpmDependencyInput implements IBuildInput {
     await this.installDependencyTree(dir, subdir, packageTree);
   }
 
-  private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: DependencyTree) {
+  private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: NpmDependencyTree) {
     for (const [key, dep] of Object.entries(tree)) {
       const depDir = path.join(subdir, 'node_modules', key);
       await dep.npmDependency.installInto(dir, depDir);
@@ -166,11 +168,11 @@ function isMonoRepoPackage(packageDirectory: string) {
  *  A
  *   +- B
  */
-function buildNaiveTree(deps: PromisedDependencies): Promise<DependencyTree> {
+function buildNaiveTree(deps: PromisedDependencies): Promise<NpmDependencyTree> {
   return recurse(deps, []);
 
   async function recurse(deps: PromisedDependencies, cycle: string[]) {
-    const ret: Record<string, DependencyNode> = {};
+    const ret: Record<string, NpmDependencyNode> = {};
 
     for (const [dep, promise] of Object.entries(deps)) {
       if (!cycle.includes(dep)) {
@@ -187,59 +189,6 @@ function buildNaiveTree(deps: PromisedDependencies): Promise<DependencyTree> {
   }
 }
 
-interface DependencyNode {
-  npmDependency: NpmDependencyInput;
-  dependencies?: Record<string, DependencyNode>;
-}
+type NpmDependencyNode = DependencyNode<NpmDependencyInput>;
 
-type DependencyTree = Record<string, DependencyNode>;
-
-/**
- * Hoist package-lock dependencies in-place
- */
-function hoistDependencies(packageLockDeps: Record<string, DependencyNode>) {
-  let didChange;
-  do {
-    didChange = false;
-    simplify(packageLockDeps);
-  } while (didChange);
-
-  // For each of the deps, move each dependency that has the same version into the current array
-  function simplify(dependencies: Record<string, DependencyNode>) {
-    for (const depPackage of Object.values(dependencies)) {
-      moveChildrenUp(depPackage, dependencies);
-    }
-    return dependencies;
-  }
-
-  // Move the children of the parent onto the same level if there are no conflicts
-  function moveChildrenUp(node: DependencyNode, parentDependencies: Record<string, DependencyNode>) {
-    if (!node.dependencies) { return; }
-
-    // Then push packages from the mutable parent into ITS parent
-    for (const [depName, depPackage] of Object.entries(node.dependencies)) {
-      if (!parentDependencies[depName]) {
-        // It's new, we can move it up.
-        parentDependencies[depName] = depPackage;
-        delete node.dependencies[depName];
-        didChange = true;
-
-        // Recurse on the package we just moved
-        moveChildrenUp(depPackage, parentDependencies);
-      } else if (parentDependencies[depName].npmDependency.version === depPackage.npmDependency.version) {
-        // Already exists, no conflict, delete the child, no need to recurse
-        delete node.dependencies[depName];
-        didChange = true;
-      } else {
-        // There is a conflict, leave the second package where it is, but do recurse.
-        moveChildrenUp(depPackage, node.dependencies);
-      }
-    }
-
-    // Cleanup for nice printing
-    if (Object.keys(node.dependencies).length === 0) {
-      delete node.dependencies;
-      didChange = true;
-    }
-  }
-}
+export type NpmDependencyTree = Record<string, NpmDependencyNode>;
