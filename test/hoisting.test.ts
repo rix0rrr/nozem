@@ -1,5 +1,5 @@
 import { kStringMaxLength } from "buffer";
-import { DependencyNode, DependencyTree, hoistDependencies, Versionable } from "../lib/util/hoisting";
+import { DependencyNode, DependencyTree, hoistDependencies, renderTree, Versionable } from "../lib/util/hoisting";
 
 type V = Versionable;
 
@@ -152,6 +152,32 @@ test('dont hoist into a parent if it would cause an incorrect version there', ()
   ]);
 });
 
+test('order of hoisting shouldnt produce a broken situation', () => {
+  // GIVEN
+  const tree: DependencyTree<V> = {
+    stringutil: pkg('1.0.0', {
+      wrapper: pkg('100.0.0', {
+        leftPad: pkg('2.0.0', {
+          spacemaker: pkg('3.0.0'),
+        }),
+      }),
+      spacemaker: pkg('4.0.0'), // Prevents spacemaker from being hoisted here, but then leftPad also shouldn't be
+    }),
+  };
+
+  // WHEN
+  hoistDependencies(tree);
+
+  // THEN
+  expect(renderTree(tree)).toEqual([
+    'stringutil=1.0.0',
+    'stringutil.spacemaker=4.0.0',
+    'wrapper=100.0.0',
+    'leftPad=2.0.0',
+    'spacemaker=3.0.0',
+  ]);
+});
+
 function pkg(version: string, dependencies?: DependencyTree<V>) {
   return {
     npmDependency: { version },
@@ -159,15 +185,3 @@ function pkg(version: string, dependencies?: DependencyTree<V>) {
   };
 }
 
-function renderTree(tree: DependencyTree<Versionable>): string[] {
-  const ret = new Array<string>();
-  recurse(tree, []);
-  return ret;
-
-  function recurse(n: DependencyTree<Versionable>, parts: string[]) {
-    for (const [k, v] of Object.entries(n)) {
-      ret.push([...parts, k].join('.') + '=' + v.npmDependency.version);
-      recurse(v.dependencies ?? {}, [...parts, k]);
-    }
-  }
-}

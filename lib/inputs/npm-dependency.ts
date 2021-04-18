@@ -4,7 +4,7 @@ import { NpmPackageBuild } from '../builds1/npm-package-build';
 import { Workspace } from '../builds1/workspace';
 import { PackageJson } from '../file-schemas';
 import { FileSet, standardHash } from '../util/files';
-import { DependencyNode, hoistDependencies } from '../util/hoisting';
+import { DependencyNode, hoistDependencies, renderTree } from '../util/hoisting';
 import { debug } from '../util/log';
 import { findNpmPackage, npmRuntimeDependencies, readPackageJson } from '../util/npm';
 import { cachedPromise, mkdict } from '../util/runtime';
@@ -90,7 +90,10 @@ export abstract class NpmDependencyInput implements IBuildInput {
     }
     // Build tree from map and hoist
     const packageTree = await buildNaiveTree(deps);
+    console.log(renderTree(packageTree).join('\n'));
     hoistDependencies(packageTree);
+    console.log('----------');
+    console.log(renderTree(packageTree).join('\n'));
 
     // Install
     await this.installDependencyTree(dir, subdir, packageTree);

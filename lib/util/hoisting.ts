@@ -82,3 +82,16 @@ export function hoistDependencies<I extends Versionable>(packageLockDeps: Depend
     return existingVersion !== undefined && existingVersion !== version;
   }
 }
+
+export function renderTree(tree: DependencyTree<Versionable>): string[] {
+  const ret = new Array<string>();
+  recurse(tree, []);
+  return ret;
+
+  function recurse(n: DependencyTree<Versionable>, parts: string[]) {
+    for (const [k, v] of Object.entries(n)) {
+      ret.push([...parts, k].join('.') + '=' + v.npmDependency.version);
+      recurse(v.dependencies ?? {}, [...parts, k]);
+    }
+  }
+}
