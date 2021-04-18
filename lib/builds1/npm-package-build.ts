@@ -56,7 +56,29 @@ export class NpmPackageBuild {
       inputs[`ext_${file}`] = new NonPackageFileInput(dir, file);
     }
 
-    return new NpmPackageBuild(workspace, dir, pj, sources, inputs);
+    const env = NpmPackageBuild.determineEnv(pj.nozem?.env, pj.nozem?.ostools);
+
+    return new NpmPackageBuild(workspace, dir, pj, sources, inputs, env);
+  }
+
+  private static determineEnv(envs?: Record<string, string>, ostools?: string[]) {
+    const ret: Record<string, string> = {};
+    for (const [key, value] of Object.entries(envs ?? {})) {
+      if (value.startsWith('|')) {
+        // Inherit from process or use remainder as default
+        ret[key] = process.env[key] ?? value.substr(1);
+      } else {
+        ret[key] = value;
+      }
+    }
+
+    // Special environment variable for package that has "dotnet" in its list of tools.
+    // Not strictly hermetic anymore, but it seems hard to achieve success otherwise
+    if (ostools?.includes('dotnet')) {
+      ret['DOTNET_CLI_HOME'] = '~';
+    }
+
+    return ret;
   }
 
   constructor(
@@ -64,7 +86,8 @@ export class NpmPackageBuild {
     public readonly directory: string,
     public readonly packageJson: PackageJson,
     private readonly sources: FileSet,
-    private readonly inputs: Record<string, IBuildInput>) {
+    private readonly inputs: Record<string, IBuildInput>,
+    private readonly env: Record<string, string>) {
   }
 
   public async inputHash() {
@@ -73,6 +96,9 @@ export class NpmPackageBuild {
       inputHash.update(`version:${NpmPackageBuild.logicVersion}\n`);
       for (const [k, v] of Object.entries(this.inputs)) {
         inputHash.update(`${k}:${await v.hash()}\n`);
+      }
+      for (const key of Object.keys(this.env).sort()) {
+        inputHash.update(`${key}=${this.env[key]}\n`);
       }
       return inputHash.digest('hex');
     });
@@ -116,11 +142,11 @@ export class NpmPackageBuild {
 
       const buildCommand = this.packageJson.scripts?.build;
       if (buildCommand) {
-        await buildDir.execute(buildCommand, {}, buildDir.directory);
+        await buildDir.execute(buildCommand, this.env, buildDir.directory);
       }
       const testCommand = this.packageJson.scripts?.test;
       if (testCommand) {
-        await buildDir.execute(testCommand, {}, buildDir.directory);
+        await buildDir.execute(testCommand, this.env, buildDir.directory);
       }
 
       // Copy back new files to source directory
@@ -207,15 +233,14 @@ function not<A>(fn: (x: A) => boolean): (x: A) => boolean {
  * It's fine if `tsconfig.json` does not exist.
  */
 async function patchTsConfig(directory: string) {
-  try {
-    const filename = path.join(directory, 'tsconfig.json');
-    const tsconfig: TsconfigJson = await readJson(filename);
-    delete tsconfig.references;
-    delete tsconfig.compilerOptions.composite;
-    delete tsconfig.compilerOptions.inlineSourceMap;
-    delete tsconfig.compilerOptions.inlineSources;
-    await writeJson(filename, tsconfig);
-  } catch (e) {
-    if (e.code !== 'ENOENT') { throw e; }
-  }
+  const filename = path.join(directory, 'tsconfig.json');
+  const tsconfig: TsconfigJson | undefined = await readJsonIfExists(filename);
+  if (!tsconfig) { return; }
+
+  delete tsconfig.references;
+  delete tsconfig.compilerOptions.composite;
+  delete tsconfig.compilerOptions.inlineSourceMap;
+  delete tsconfig.compilerOptions.inlineSources;
+
+  await writeJson(filename, tsconfig);
 }

@@ -2,6 +2,13 @@ export function flatMap<A, B>(xs: A[], fn: (x: A) => B[]): B[] {
   return Array.prototype.concat.apply([], xs.map(fn));
 }
 
+export function errorWithCode<E extends Error>(code: string | undefined, e: E): E {
+  if (code !== undefined) {
+    (e as any).code = code;
+  }
+  return e;
+}
+
 export function mkdict<A>(xs: Iterable<[string, A]>): Record<string, A> {
   const ret: Record<string, A> = {};
   for (const [k, v] of xs) {

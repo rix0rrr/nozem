@@ -90,12 +90,7 @@ export abstract class NpmDependencyInput implements IBuildInput {
     }
     // Build tree from map and hoist
     const packageTree = await buildNaiveTree(deps);
-    // console.log(renderTree(packageTree).join('\n'));
-    console.log('begin hoist');
     hoistDependencies(packageTree);
-    console.log('end hoist');
-    // console.log('----------');
-    // console.log(renderTree(packageTree).join('\n'));
 
     // Install
     await this.installDependencyTree(dir, subdir, packageTree.dependencies ?? {});

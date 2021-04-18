@@ -23,6 +23,9 @@ export type DependencySet<I extends object> = Record<string, DependencyNode<I>>;
  * This two-phase process replaces a proces that did move-and-delete as one step, which
  * sometimes would hoist a package into a place that was previously vacated by a conflicting
  * version, thereby causing the wrong version to be loaded.
+ *
+ * Hoisting is still rather expensive on a large tree (~100ms), we should find ways to
+ * speed it up.
  */
 export function hoistDependencies<I extends object>(packageTree: DependencyNode<I>) {
   const originalDependencies = new Map<DependencyNode<I>, string[]>();

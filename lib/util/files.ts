@@ -2,7 +2,7 @@ import { promises as fs, Stats } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as log from './log';
-import { cachedPromise, escapeRegExp } from './runtime';
+import { cachedPromise, errorWithCode, escapeRegExp } from './runtime';
 import { combinedGitIgnores } from './ignorefiles';
 
 const hashSym = Symbol();
@@ -358,7 +358,7 @@ export async function readJson(filename: string) {
   try {
     return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
   } catch (e) {
-    throw new Error(`While reading ${filename}: ${e}`);
+    throw errorWithCode(e.code, new Error(`While reading ${filename}: ${e}`));
   }
 }
 
@@ -367,7 +367,7 @@ export async function readJsonIfExists(filename: string): Promise<any | undefine
     return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
   } catch (e) {
     if (e.code === 'ENOENT') { return undefined; }
-    throw e;
+    throw errorWithCode(e.code, new Error(`While reading ${filename}: ${e}`));
   }
 }
 

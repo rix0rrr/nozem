@@ -31,6 +31,7 @@ export interface PjNozemOptions {
   readonly globalNonPackageFiles?: string[];
   readonly copyAllSourcesForTest?: boolean;
   readonly skipTsApiOptimization?: boolean;
+  readonly env?: Record<string, string>;
 }
 
 /**
