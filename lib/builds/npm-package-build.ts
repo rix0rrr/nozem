@@ -1,5 +1,4 @@
 import * as path from 'path';
-import { x } from 'tar';
 import { PackageJson, TsconfigJson } from "../file-schemas";
 import { IBuildInput } from "../inputs/build-input";
 import { SourceInput } from "../inputs/input-source";
@@ -10,8 +9,7 @@ import { FileSet, FileSetSchema, readJson, readJsonIfExists, standardHash, write
 import { debug, info } from "../util/log";
 import { findNpmPackage, npmDependencies, readPackageJson } from "../util/npm";
 import { cachedPromise, partition, partitionT } from "../util/runtime";
-import { BuildDirectory } from "./build-directory";
-import { Workspace } from './workspace';
+import { BuildDirectory, Workspace } from '../build-tools';
 
 const artifactsCacheSymbol = Symbol();
 const inputHashCacheSymbol = Symbol();

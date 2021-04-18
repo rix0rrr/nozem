@@ -1,7 +1,7 @@
 import * as path from 'path';
-import { BuildDirectory } from '../builds1/build-directory';
-import { NpmPackageBuild } from '../builds1/npm-package-build';
-import { Workspace } from '../builds1/workspace';
+import { BuildDirectory } from '../build-tools/build-directory';
+import { NpmPackageBuild } from '../builds/npm-package-build';
+import { Workspace } from '../build-tools/workspace';
 import { PackageJson } from '../file-schemas';
 import { FileSet, standardHash } from '../util/files';
 import { DependencyNode, DependencySet, hoistDependencies, renderTree } from '../util/hoisting';

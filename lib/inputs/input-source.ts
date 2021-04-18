@@ -1,4 +1,4 @@
-import { BuildDirectory } from '../builds1/build-directory';
+import { BuildDirectory } from '../build-tools/build-directory';
 import { FileSet } from '../util/files';
 import { IBuildInput } from './build-input';
 

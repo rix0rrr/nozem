@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { BuildDirectory } from '../builds1/build-directory';
+import { BuildDirectory } from '../build-tools/build-directory';
 import { fileHash } from '../util/files';
 import { IBuildInput } from './build-input';
 

@@ -2,7 +2,7 @@ import * as path from 'path';
 import { PackageJson } from '../file-schemas';
 import { exists } from '../util/files';
 import { readPackageJson } from '../util/npm';
-import { NpmPackageBuild } from './npm-package-build';
+import { NpmPackageBuild } from '../builds/npm-package-build';
 
 export class Workspace {
   private packageBuildCache = new Map<string, NpmPackageBuild>();
