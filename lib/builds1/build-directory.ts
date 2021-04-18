@@ -11,7 +11,7 @@ const cpExec = util.promisify(child_process.exec);
 
 export class BuildDirectory {
   public static async make(): Promise<BuildDirectory> {
-    const tmpDir = await fs.mkdtemp(os.tmpdir());
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'nzmb'));
     return new BuildDirectory(tmpDir);
   }
 

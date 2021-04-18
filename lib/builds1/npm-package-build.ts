@@ -62,6 +62,10 @@ export class NpmPackageBuild {
   }
 
   private static determineEnv(envs?: Record<string, string>, ostools?: string[]) {
+    // FIXME: The use of 'CODEBUILD_RESOLVED_SOURCE_VERSION' as environment
+    // variable in the CLI and not trying to come up with our own variant will
+    // make it rather impossible to share artifacts between build server and
+    // local builds.
     const ret: Record<string, string> = {};
     for (const [key, value] of Object.entries(envs ?? {})) {
       if (value.startsWith('|')) {
@@ -74,8 +78,9 @@ export class NpmPackageBuild {
 
     // Special environment variable for package that has "dotnet" in its list of tools.
     // Not strictly hermetic anymore, but it seems hard to achieve success otherwise
+    // Running into variants of https://github.com/dotnet/sdk/issues/5658
     if (ostools?.includes('dotnet')) {
-      ret['DOTNET_CLI_HOME'] = '~';
+      ret['HOME'] = '~';
     }
 
     return ret;
