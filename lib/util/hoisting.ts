@@ -28,12 +28,7 @@ export function hoistDependencies<I extends object>(packageTree: DependencyNode<
   const originalDependencies = new Map<DependencyNode<I>, string[]>();
   recordOriginalDependencies(packageTree);
 
-  let didChange;
-  do {
-    didChange = false;
-    moveUp(packageTree);
-  } while (didChange);
-
+  moveUp(packageTree);
   removeDupes(packageTree, []);
   removeUseless(packageTree);
 
@@ -41,20 +36,19 @@ export function hoistDependencies<I extends object>(packageTree: DependencyNode<
   function moveUp(node: DependencyNode<I>, parent?: DependencyNode<I>) {
     if (!node.dependencies) { return; }
 
+    // Recurse
+    for (const child of Object.values(node.dependencies)) {
+      moveUp(child, node);
+    }
+
     // Then push packages from the current node into its parent
     if (parent) {
       for (const [depName, depPackage] of Object.entries(node.dependencies)) {
         if (!parent.dependencies?.[depName]) {
           // It's new and there's no version conflict, we can move it up.
           parent.dependencies![depName] = depPackage;
-          didChange = true;
         }
       }
-    }
-
-    // Recurse
-    for (const child of Object.values(node.dependencies)) {
-      moveUp(child, node);
     }
   }
 
