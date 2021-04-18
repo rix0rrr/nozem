@@ -29,3 +29,10 @@ nozem-cache.json
 ```
 
 Get me to make you a user to a shared cache.
+
+
+## Troubleshooting
+
+# Docker fails with: unable to create context store: $HOME is not defined
+
+Docker > Preferences > Command Line > Uncheck **Enable Cloud Experience**.

@@ -2,14 +2,29 @@ import { promises as fs, Stats } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as log from './log';
-import { cachedPromise, escapeRegExp } from './runtime';
+import { cachedPromise, errorWithCode, escapeRegExp } from './runtime';
+import { combinedGitIgnores } from './ignorefiles';
 
 const hashSym = Symbol();
+
+export interface FileSetSchema {
+  readonly relativePaths: string[];
+}
 
 /**
  * A set of files, relative to a directory
  */
 export class FileSet {
+  public static fromSchema(dir: string, schema: FileSetSchema) {
+    return new FileSet(dir, schema.relativePaths);
+  }
+
+  public static async fromGitignored(root: string, extraIgnores?: string[]) {
+    const ignores = await combinedGitIgnores(root);
+    ignores.push(...extraIgnores ?? []);
+    return await FileSet.fromDirectoryWithIgnores(root, ignores);
+  }
+
   public static async fromMatcher(root: string, matcher: FileMatcher) {
     const files = new Array<string>();
     await walkFiles(root, matcher, async (f) => { files.push(f); });
@@ -18,6 +33,11 @@ export class FileSet {
 
   public static async fromDirectory(root: string) {
     return FileSet.fromMatcher(root, ALL_FILES_MATCHER);
+  }
+
+  public static fromDirectoryWithIgnores(root: string, ignorePatterns: string[]) {
+    const ignorePattern = new FilePatterns(ignorePatterns);
+    return FileSet.fromMatcher(root, ignorePattern.toComplementaryMatcher());
   }
 
   constructor(public readonly root: string, public readonly fileNames: string[]) {
@@ -38,10 +58,21 @@ export class FileSet {
     }
   }
 
-  public async copyTo(targetDir: string) {
-    return promiseAllBatch(8, this.fileNames.map((f) => () => copy(
+  public async copyTo(targetDir: string): Promise<FileSet> {
+    await promiseAllBatch(8, this.fileNames.map((f) => () => copy(
         path.join(this.root, f),
         path.join(targetDir, f))));
+
+    return this.rebase(targetDir);
+  }
+
+  public rebase(newDirectory: string) {
+    return new FileSet(newDirectory, this.fileNames);
+  }
+
+  public except(rhs: FileSet) {
+    const ignorePaths = new Set(rhs.fileNames);
+    return new FileSet(this.root, this.fileNames.filter(f => !ignorePaths.has(f)));
   }
 
   public async hash() {
@@ -62,22 +93,44 @@ export class FileSet {
     });
   }
 
+  public filter(pred: (x: string) => boolean): FileSet {
+    return new FileSet(this.root, this.fileNames.filter(pred));
+  }
+
+  public toSchema(): FileSetSchema {
+    return {
+      relativePaths: this.fileNames,
+    };
+  }
+
   public async fileHashes() {
-    return (await promiseAllBatch(8, this.fileNames.map((file) => async () => {
+    return (await promiseAllBatch(4, this.fileNames.map((file) => async () => {
       const fullPath = path.join(this.root, file);
       return `${file}\n${await fileHash(fullPath)}\n`;
     }))).join('');
   }
 }
 
-async function fileHash(fullPath: string) {
+const hashCache = new Map<string, string>();
+
+export async function fileHash(fullPath: string) {
+  /*
+  const existing = hashCache.get(fullPath);
+  if (existing) { return existing; }
+  */
+
+  const stats = await fs.lstat(fullPath);
   const hash = standardHash();
-  if ((await fs.lstat(fullPath)).isSymbolicLink()) {
+  if (stats.isSymbolicLink()) {
     hash.update(await fs.readlink(fullPath));
   } else {
     hash.update(await fs.readFile(fullPath));
   }
-  return hash.digest('hex');
+  const ret = hash.digest('hex');
+  /*
+  hashCache.set(fullPath, ret);
+  */
+  return ret;
 }
 
 export interface FileMatcher {
@@ -280,6 +333,7 @@ export async function rimraf(x: string) {
       for (const child of await fs.readdir(x)) {
         await rimraf(path.join(x, child));
       }
+      await fs.rmdir(x);
     } else {
       await fs.unlink(x);
     }
@@ -289,13 +343,32 @@ export async function rimraf(x: string) {
   }
 }
 
-export async function ensureSymlink(target: string, filePath: string) {
+export async function ensureSymlink(target: string, filePath: string, overwrite?: boolean) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.symlink(target, filePath);
+  try {
+    await fs.symlink(target, filePath);
+  } catch (e) {
+    if (e.code !== 'EEXIST') { throw e; }
+    await fs.unlink(filePath);
+    await fs.symlink(target, filePath);
+  }
 }
 
 export async function readJson(filename: string) {
-  return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+  try {
+    return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+  } catch (e) {
+    throw errorWithCode(e.code, new Error(`While reading ${filename}: ${e}`));
+  }
+}
+
+export async function readJsonIfExists(filename: string): Promise<any | undefined> {
+  try {
+    return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
+  } catch (e) {
+    if (e.code === 'ENOENT') { return undefined; }
+    throw errorWithCode(e.code, new Error(`While reading ${filename}: ${e}`));
+  }
 }
 
 export async function writeJson(filename: string, obj: any) {
@@ -329,6 +402,16 @@ export async function removeOldSubDirectories(n: number, dirName: string) {
   });
 }
 
+export async function pathExists(f: string) {
+  try {
+    await fs.stat(f);
+    return true;
+  } catch (e) {
+    if (e.code === 'ENOENT') { return false; }
+    throw e;
+  }
+}
+
 /**
  * Find the most specific file with the given name up from the startin directory
  */
@@ -342,11 +425,15 @@ export async function findFileUp(filename: string, startDir: string, rootDir?: s
  *
  * Returns the most specific file at the end.
  */
-export async function findFilesUp(filename: string, startDir: string, rootDir?: string): Promise<string[]> {
+export async function findFilesUp(filename: string, startDir: string, isRootDir?: string | ((x: string) => Promise<boolean>)): Promise<string[]> {
   const ret = new Array<string>();
 
   startDir = path.resolve(startDir);
-  rootDir = rootDir ? path.resolve(rootDir) : undefined;
+
+  if (typeof isRootDir === 'string') {
+    const resolvedRoot = path.resolve(isRootDir);
+    isRootDir = (x: string) => Promise.resolve(x === resolvedRoot);
+  }
 
   let currentDir = startDir;
   while (true) {
@@ -355,7 +442,7 @@ export async function findFilesUp(filename: string, startDir: string, rootDir?: 
       ret.push(fullPath);
     }
 
-    if (currentDir === rootDir) { break; }
+    if (isRootDir && await isRootDir(currentDir)) { break; }
     const next = path.dirname(currentDir);
     if (next === currentDir) { break; }
     currentDir = next;

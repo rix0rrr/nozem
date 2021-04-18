@@ -14,6 +14,7 @@ export interface PackageJson {
   readonly dependencies?: Record<string, string>;
   readonly devDependencies?: Record<string, string>;
   readonly peerDependencies?: Record<string, string>;
+  readonly bundledDependencies?: string[];
   readonly bin?: Record<string, string> | string;
   readonly main?: string;
   readonly jsii?: any;
@@ -26,8 +27,11 @@ export interface PackageJson {
  */
 export interface PjNozemOptions {
   readonly ostools?: string[];
+  readonly nonPackageFiles?: string[];
+  readonly globalNonPackageFiles?: string[];
   readonly copyAllSourcesForTest?: boolean;
   readonly skipTsApiOptimization?: boolean;
+  readonly env?: Record<string, string>;
 }
 
 /**

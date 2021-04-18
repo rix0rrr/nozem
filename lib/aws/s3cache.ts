@@ -4,8 +4,8 @@ import * as log from '../util/log';
 import { promises as fs } from 'fs';
 import * as tar from 'tar';
 
-import { IRemoteCache, PackageVersion } from '../build-tools';
 import { exists } from '../util/files';
+import { IRemoteCache, PackageVersion } from '../build-tools/remote-cache';
 
 export class S3Cache implements IRemoteCache {
   private readonly s3: import('aws-sdk').S3;
@@ -65,11 +65,15 @@ export class S3Cache implements IRemoteCache {
       return query.promise();
     })?.then(() => {
       const delta = (Date.now() - start) / 1000;
-      log.info(`Cached ${pv.packageName} in ${delta.toFixed(1)}s`);
+      log.info(`Cached ${keyify(pv.relativePath)} in ${delta.toFixed(1)}s`);
     });
   }
 
   private objectLocation(pv: PackageVersion) {
-    return `nozem/${pv.packageName}/${pv.inHash}.tgz`;
+    return `nozem/${keyify(pv.relativePath)}/${pv.inputHash}.tgz`;
   }
+}
+
+function keyify(x: string) {
+  return x.replace(/\//g, '-');
 }
