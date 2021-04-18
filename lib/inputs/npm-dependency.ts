@@ -4,7 +4,7 @@ import { NpmPackageBuild } from '../builds1/npm-package-build';
 import { Workspace } from '../builds1/workspace';
 import { PackageJson } from '../file-schemas';
 import { FileSet, standardHash } from '../util/files';
-import { DependencyNode, hoistDependencies, renderTree } from '../util/hoisting';
+import { DependencyNode, DependencySet, hoistDependencies, renderTree } from '../util/hoisting';
 import { debug } from '../util/log';
 import { findNpmPackage, npmRuntimeDependencies, readPackageJson } from '../util/npm';
 import { cachedPromise, mkdict } from '../util/runtime';
@@ -96,7 +96,7 @@ export abstract class NpmDependencyInput implements IBuildInput {
     console.log(renderTree(packageTree).join('\n'));
 
     // Install
-    await this.installDependencyTree(dir, subdir, packageTree);
+    await this.installDependencyTree(dir, subdir, packageTree.dependencies ?? {});
   }
 
   private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: NpmDependencyTree) {
@@ -171,17 +171,22 @@ function isMonoRepoPackage(packageDirectory: string) {
  *  A
  *   +- B
  */
-function buildNaiveTree(deps: PromisedDependencies): Promise<NpmDependencyTree> {
-  return recurse(deps, []);
+async function buildNaiveTree(deps: PromisedDependencies): Promise<NpmDependencyNode> {
+  return {
+    version: '*',
+    npmDependency: undefined as any, // <-- OH NO. This is never looked at anyway, don't know how to make this better.
+    dependencies: await recurse(deps, []),
+  };
 
   async function recurse(deps: PromisedDependencies, cycle: string[]) {
-    const ret: Record<string, NpmDependencyNode> = {};
+    const ret: NpmDependencyTree = {};
 
     for (const [dep, promise] of Object.entries(deps)) {
       if (!cycle.includes(dep)) {
         const npm = await promise;
 
         ret[dep] = {
+          version: npm.version,
           npmDependency: npm,
           dependencies: await recurse(npm.transitiveDeps, [...cycle, dep]),
         };
@@ -192,6 +197,10 @@ function buildNaiveTree(deps: PromisedDependencies): Promise<NpmDependencyTree> 
   }
 }
 
-type NpmDependencyNode = DependencyNode<NpmDependencyInput>;
+interface NpmNodeInfo {
+  npmDependency: NpmDependencyInput;
+}
 
-export type NpmDependencyTree = Record<string, NpmDependencyNode>;
+type NpmDependencyNode = DependencyNode<NpmNodeInfo>;
+
+export type NpmDependencyTree = DependencySet<NpmNodeInfo>;
