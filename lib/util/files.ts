@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as log from './log';
 import { cachedPromise, errorWithCode, escapeRegExp } from './runtime';
-import { combinedGitIgnores } from './ignorefiles';
+import { allGitIgnores, FilePattern, loadPatternFile } from './ignorefiles';
 
 const hashSym = Symbol();
 
@@ -19,15 +19,15 @@ export class FileSet {
     return new FileSet(dir, schema.relativePaths);
   }
 
-  public static async fromGitignored(root: string, extraIgnores?: string[]) {
-    const ignores = await combinedGitIgnores(root);
-    ignores.push(...extraIgnores ?? []);
-    return await FileSet.fromDirectoryWithIgnores(root, ignores);
+  public static async fromGitignored(root: string, ...extraIgnores: FilePattern[]) {
+    const matcher = await IgnoreFileMatcher.fromGitignore(root);
+    matcher.addPatterns(...extraIgnores);
+    return await FileSet.fromMatcher(root, matcher);
   }
 
   public static async fromMatcher(root: string, matcher: FileMatcher) {
     const files = new Array<string>();
-    await walkFiles(root, matcher, async (f) => { files.push(f); });
+    await walkFiles(root, matcher, async (f) => { files.push(path.relative(root, f)); });
     return new FileSet(root, files);
   }
 
@@ -35,9 +35,9 @@ export class FileSet {
     return FileSet.fromMatcher(root, ALL_FILES_MATCHER);
   }
 
-  public static fromDirectoryWithIgnores(root: string, ignorePatterns: string[]) {
-    const ignorePattern = new FilePatterns(ignorePatterns);
-    return FileSet.fromMatcher(root, ignorePattern.toComplementaryMatcher());
+  public static fromDirectoryWithIgnores(directory: string, ignorePatterns: string[]) {
+    const ignorePattern = new FilePatterns({ directory, patterns: ignorePatterns });
+    return FileSet.fromMatcher(directory, ignorePattern.toComplementaryMatcher());
   }
 
   constructor(public readonly root: string, public readonly fileNames: string[]) {
@@ -134,8 +134,8 @@ export async function fileHash(fullPath: string) {
 }
 
 export interface FileMatcher {
-  visitDirectory(name: string): boolean;
-  visitFile(name: string): boolean;
+  visitDirectory(name: string): boolean | Promise<boolean>;
+  visitFile(name: string): boolean | Promise<boolean>;
 }
 
 export const ALL_FILES_MATCHER: FileMatcher = {
@@ -144,17 +144,17 @@ export const ALL_FILES_MATCHER: FileMatcher = {
 };
 
 export async function walkFiles(root: string, matcher: FileMatcher, visitor: (cb: string) => Promise<void>) {
-  const relPaths = ['.'];
-  while (relPaths.length > 0) {
-    const relPath = relPaths.pop()!;
+  const absPaths = [path.resolve(root)];
+  while (absPaths.length > 0) {
+    const absPath = absPaths.pop()!;
     // opendir is Node 12+, so use readdir instead
-    for await (const child of await fs.readdir(path.join(root, relPath), { withFileTypes: true })) {
-      const relChildPath = path.join(relPath, child.name);
-      if (child.isDirectory() && matcher.visitDirectory(relChildPath)) {
-        relPaths.push(relChildPath);
+    for await (const child of await fs.readdir(absPath, { withFileTypes: true })) {
+      const absChildPath = path.join(absPath, child.name);
+      if (child.isDirectory() && await matcher.visitDirectory(absChildPath)) {
+        absPaths.push(absChildPath);
       }
-      if ((child.isFile() || child.isSymbolicLink()) && matcher.visitFile(relChildPath)) {
-        await visitor(relChildPath);
+      if ((child.isFile() || child.isSymbolicLink()) && await matcher.visitFile(absChildPath)) {
+        await visitor(absChildPath);
       }
     }
   }
@@ -196,28 +196,86 @@ function globToRegex(pattern: string) {
   return new RegExp(`^${regexParts.join('')}${dirSuffix}`);
 }
 
-export class FilePatterns {
-  private readonly regexes = new Array<{ neg: boolean, regex: RegExp }>();
-  private _patternHash?: string;
+/**
+ * Matches files based on ignorefiles (.gitignore/.npmignore)
+ *
+ * Will load more ignore-files as it's encountering them.
+ */
+export class IgnoreFileMatcher implements FileMatcher {
+  private readonly directoriesLoaded = new Set<string>();
+  private readonly patterns = new FilePatterns();
 
-  constructor(private readonly patterns: string[]) {
-    for (const pattern of patterns) {
-      const neg = pattern.startsWith('!');
-      const shortPattern = pattern.replace(/^!/, '');
-      const regex = globToRegex(shortPattern);
-      this.regexes.push({ neg, regex });
-    }
+  public static async fromGitignore(dir: string) {
+    const gitRoot = await findFileUp('.git', dir);
+    if (!gitRoot) { throw new Error(`Could not find '.git' upwards of: ${dir}`); }
+    return new IgnoreFileMatcher('.gitignore', path.dirname(gitRoot));
   }
 
-  public patternHash() {
-    if (!this._patternHash) {
-      const d = standardHash();
-      for (const file of this.patterns) {
-        d.update(`${file}\n`);
-      }
-      this._patternHash = d.digest('hex');
+  constructor(private readonly patternFileName: string, private readonly rootDirectory: string) {
+  }
+
+  public addPatterns(...patterns: FilePattern[]) {
+    this.patterns.addPatterns(...patterns);
+  }
+
+  public async visitDirectory(name: string): Promise<boolean> {
+    await this.primeCache(name);
+    return !this.patterns.matches(name, true);
+  }
+
+  public async visitFile(name: string): Promise<boolean> {
+    await this.primeCache(name);
+    return !this.patterns.matches(name, false);
+  }
+
+  private async primeCache(name: string) {
+    let dir = path.dirname(name);
+
+    while (true) {
+      if (this.directoriesLoaded.has(dir)) { return; }
+      this.patterns.addPatterns(await loadPatternFile(path.join(dir, this.patternFileName)));
+      this.directoriesLoaded.add(dir);
+
+      if (dir === this.rootDirectory) { return; }
+      const next = path.dirname(dir);
+      if (dir === next) { return; }
+      dir = next;
     }
-    return this._patternHash;
+  }
+}
+
+interface FileRegex {
+  readonly neg: boolean;
+  readonly regex: RegExp;
+};
+
+interface RegexGroup {
+  readonly directory: string;
+  readonly regexes: FileRegex[];
+};
+
+export class FilePatterns {
+  private readonly regexGroups = new Array<RegexGroup>();
+
+  constructor(...patternses: FilePattern[]) {
+    this.addPatterns(...patternses);
+  }
+
+  public addPatterns(...patternses: FilePattern[]) {
+    if (patternses.length === 0) { return; }
+
+    this.regexGroups.push(...patternses.map(patterns => ({
+      directory: ensureAbsolute(patterns.directory),
+      regexes: patterns.patterns.map(pattern => {
+        const neg = pattern.startsWith('!');
+        const shortPattern = pattern.replace(/^!/, '');
+        const regex = globToRegex(shortPattern);
+        return { neg, regex } as FileRegex;
+      }),
+    } as RegexGroup)));
+
+    // Sort by directories (shortest first)
+    this.regexGroups.sort((a, b) => a.directory.localeCompare(b.directory));
   }
 
   public toIncludeMatcher(): FileMatcher {
@@ -234,12 +292,19 @@ export class FilePatterns {
     };
   }
 
-  public matches(file: string, isDir: boolean) {
-    if (isDir) { file += '/'; }
+  public matches(fileName: string, isDir: boolean) {
+    ensureAbsolute(fileName);
+    if (isDir) { fileName += '/'; }
+
     let ret = false;
-    for (const pattern of this.regexes) {
-      if (pattern.regex.test(file)) {
-        ret = !pattern.neg;
+    for (const group of this.regexGroups) {
+      if (!isProperChildOf(fileName, group.directory)) { continue; } // Does not apply
+
+      const relativeName = path.relative(group.directory, fileName) + (isDir ? '/' : '');
+      for (const regex of group.regexes) {
+        if (regex.regex.test(relativeName)) {
+          ret = !regex.neg;
+        }
       }
     }
     return ret;
@@ -375,10 +440,6 @@ export async function writeJson(filename: string, obj: any) {
   await fs.writeFile(filename, JSON.stringify(obj, undefined, 2), { encoding: 'utf-8' });
 }
 
-export function globMany(root: string, globs: string[]): Promise<FileSet> {
-  return FileSet.fromMatcher(root, new FilePatterns(['*/', ...globs]).toIncludeMatcher());
-}
-
 export async function ignoreEnoent(block: () => Promise<void>): Promise<void> {
   try {
     await block();
@@ -450,4 +511,16 @@ export async function findFilesUp(filename: string, startDir: string, isRootDir?
 
   // Most specific file at the end
   return ret.reverse();
+}
+
+function ensureAbsolute(fileName: string) {
+  if (!path.isAbsolute(fileName)) {
+    throw new Error(`Whoops! Expected an absolute path, got: ${fileName}`);
+  }
+  return fileName;
+}
+
+function isProperChildOf(fileName: string, directory: string) {
+  if (!directory.endsWith(path.sep)) { directory += path.sep; }
+  return fileName.startsWith(directory);
 }

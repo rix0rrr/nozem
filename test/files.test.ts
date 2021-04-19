@@ -20,9 +20,9 @@ test('ignore node_modules', () => {
   ]);
 
   expect(result).toEqual([
-    'bloop.ts',
-    '.eslintrc.js',
-    'subdir/bla.log',
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/subdir/bla.log',
   ]);
 });
 
@@ -33,10 +33,10 @@ test('unignore previous ignore', () => {
   ]);
 
   expect(result).toEqual([
-    'bloop.ts',
-    '.eslintrc.js',
-    'node_modules/inner',
-    'subdir/bla.log',
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/node_modules/inner',
+    '/subdir/bla.log',
   ]);
 });
 
@@ -56,8 +56,8 @@ test('ignore rooted path here', () => {
   ]);
 
   expect(result).toEqual([
-    'bla.log',
-    'sub/subdir/bla.log',
+    '/bla.log',
+    '/sub/subdir/bla.log',
   ]);
 });
 
@@ -67,9 +67,33 @@ test('ignore rooted path', () => {
   ]);
 
   expect(result).toEqual([
-    'bloop.ts',
-    '.eslintrc.js',
-    'node_modules/inner',
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/node_modules/inner',
+  ]);
+});
+
+test('ignore rooted path with wildcard', () => {
+  const result = negMatch(FILESET1, [
+    'subdir/*.log',
+  ]);
+
+  expect(result).toEqual([
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/node_modules/inner',
+  ]);
+});
+
+test('ignore rooted path with ./ prefix', () => {
+  const result = negMatch(FILESET1, [
+    './subdir/*.log',
+  ]);
+
+  expect(result).toEqual([
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/node_modules/inner',
   ]);
 });
 
@@ -80,7 +104,7 @@ test('posmatch in subdirectory', () => {
   ]);
 
   expect(result).toEqual([
-    'subdir/bla.log',
+    '/subdir/bla.log',
   ]);
 });
 
@@ -92,9 +116,9 @@ test('posmatch inverse to exclude subdirectory', () => {
   ]);
 
   expect(result).toEqual([
-    'bloop.ts',
-    '.eslintrc.js',
-    'node_modules/inner',
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/node_modules/inner',
   ]);
 });
 
@@ -106,9 +130,9 @@ test('posmatch inverse to exclude subdirectory with slash', () => {
   ]);
 
   expect(result).toEqual([
-    'bloop.ts',
-    '.eslintrc.js',
-    'node_modules/inner',
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/node_modules/inner',
   ]);
 });
 
@@ -118,26 +142,26 @@ test('**/* also matches in current directory', () => {
   ]);
 
   expect(result).toEqual([
-    'bloop.ts',
-    '.eslintrc.js',
-    'node_modules/inner',
-    'subdir/bla.log',
+    '/bloop.ts',
+    '/.eslintrc.js',
+    '/node_modules/inner',
+    '/subdir/bla.log',
   ]);
 });
 
 //----------------------------------------------------------------------
 
 function posMatch(folder: Record<string, any>, patterns: string[]) {
-  return walk(folder, new FilePatterns(patterns).toIncludeMatcher());
+  return walk(folder, new FilePatterns({ directory: '/', patterns }).toIncludeMatcher());
 }
 
 function negMatch(folder: Record<string, any>, patterns: string[]) {
-  return walk(folder, new FilePatterns(patterns).toComplementaryMatcher());
+  return walk(folder, new FilePatterns({ directory: '/', patterns }).toComplementaryMatcher());
 }
 
 function walk(folder: Record<string, any>, matcher: FileMatcher): string[] {
   const ret = new Array<string>();
-  const relPaths = [{ path: '.', folder }];
+  const relPaths = [{ path: '/', folder }];
   while (relPaths.length > 0) {
     const relPath = relPaths.splice(0, 1)[0];
 
