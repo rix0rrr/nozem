@@ -31,7 +31,7 @@ export class NpmPackageBuild {
     const pj = await readPackageJson(dir);
 
     const inputs: Record<string, IBuildInput> = {};
-    const sources = await FileSet.fromGitignored(dir, ['.nzm-*']);
+    const sources = await FileSet.fromGitignored(dir, { directory: dir, patterns: ['.nzm-*'] });
     inputs.source = new SourceInput(sources);
 
     for (const dep of npmDependencies(pj)) {
@@ -78,7 +78,7 @@ export class NpmPackageBuild {
     // Not strictly hermetic anymore, but it seems hard to achieve success otherwise
     // Running into variants of https://github.com/dotnet/sdk/issues/5658
     if (ostools?.includes('dotnet')) {
-      ret['HOME'] = '~';
+      ret['DOTNET_CLI_HOME'] = 'dotnet_home';
     }
 
     return ret;
