@@ -21,7 +21,6 @@
   },
   "bin": {
     "nzm": "dist/bin/nzm.js",
-    "nzm1": "dist/bin/nzm1.js",
     "nozem": "dist/bin/nzm.js"
   },
   "scripts": {
