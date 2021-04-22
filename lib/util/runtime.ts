@@ -9,7 +9,7 @@ export function errorWithCode<E extends Error>(code: string | undefined, e: E): 
   return e;
 }
 
-export function mkdict<A>(xs: Iterable<[string, A]>): Record<string, A> {
+export function mkdict<A>(xs: Iterable<readonly [string, A]>): Record<string, A> {
   const ret: Record<string, A> = {};
   for (const [k, v] of xs) {
     ret[k] = v;

@@ -7,7 +7,7 @@ export async function readPackageJson(dir: string) {
   return await readJson(path.join(dir, 'package.json')) as PackageJson;
 }
 
-export function npmDependencies(pj: PackageJson) {
+export function npmBuildDependencies(pj: PackageJson) {
   return [...Object.keys(pj.dependencies ?? {}), ...Object.keys(pj.devDependencies ?? {})].sort();
 }
 

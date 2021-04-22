@@ -19,7 +19,7 @@ export interface PackageJson {
   readonly main?: string;
   readonly jsii?: any;
   readonly scripts?: Record<string, string>;
-  readonly nozem?: PjNozemOptions;
+  readonly nozem?: PjNozemOptions | false;
 }
 
 /**

@@ -520,7 +520,7 @@ function ensureAbsolute(fileName: string) {
   return fileName;
 }
 
-function isProperChildOf(fileName: string, directory: string) {
+export function isProperChildOf(fileName: string, directory: string) {
   if (!directory.endsWith(path.sep)) { directory += path.sep; }
   return fileName.startsWith(directory);
 }

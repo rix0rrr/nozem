@@ -61,6 +61,21 @@ test('ignore rooted path here', () => {
   ]);
 });
 
+test.each([
+  'subdir/bla.log',
+  './subdir/bla.log',
+  '/subdir/bla.log'
+])('%s selects rooted path here', (pattern) => {
+  const result = posMatch(FILESET1, [
+    '*/',  // <- necessary to recurse into subdirs at all
+    pattern,
+  ]);
+
+  expect(result).toEqual([
+    '/subdir/bla.log'
+  ]);
+});
+
 test('ignore rooted path', () => {
   const result = negMatch(FILESET1, [
     'subdir/bla.log',

@@ -1,13 +1,13 @@
 import * as path from 'path';
 import { BuildDirectory } from '../build-tools/build-directory';
-import { NpmPackageBuild } from '../builds/npm-package-build';
+import { NonHermeticNpmPackageBuild, NozemNpmPackageBuild, NpmPackageBuild } from '../builds/npm-package-build';
 import { Workspace } from '../build-tools/workspace';
 import { PackageJson } from '../file-schemas';
 import { FileSet, standardHash } from '../util/files';
 import { DependencyNode, DependencySet, hoistDependencies, renderTree } from '../util/hoisting';
 import { debug } from '../util/log';
 import { findNpmPackage, npmRuntimeDependencies, readPackageJson } from '../util/npm';
-import { cachedPromise, mkdict } from '../util/runtime';
+import { cachedPromise } from '../util/runtime';
 import { IBuildInput } from './build-input';
 
 const objectCache: any = {};
@@ -18,7 +18,7 @@ const sourcesSym = Symbol();
 type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
 
 export abstract class NpmDependencyInput implements IBuildInput {
-  public static async fromDirectory(workspace: Workspace, packageDirectory: string, alreadyIncluded?: string[]) {
+  public static async fromDirectory(workspace: Workspace, packageDirectory: string, alreadyIncluded?: string[]): Promise<NpmDependencyInput> {
     return cachedPromise(objectCache, packageDirectory, async () => {
       const packageJson = await readPackageJson(packageDirectory);
 
@@ -34,9 +34,17 @@ export abstract class NpmDependencyInput implements IBuildInput {
         trans[name] = NpmDependencyInput.fromDirectory(workspace, found, [...alreadyIncluded ?? [], name]);
       }
 
-      return isMonoRepoPackage(packageDirectory)
-        ? new MonoRepoBuildDependencyInput(packageDirectory, packageJson, trans, await workspace.npmPackageBuild(packageDirectory))
-        : new NpmRepoDependencyInput(packageDirectory, packageJson, trans);
+      if (isMonoRepoPackage(packageDirectory)) {
+        const monoRepoBuild = await workspace.npmPackageBuild(packageDirectory);
+        if (monoRepoBuild instanceof NozemNpmPackageBuild) {
+          return new MonoRepoBuildDependencyInput(packageDirectory, packageJson, trans, monoRepoBuild);
+        }
+        if (monoRepoBuild instanceof NonHermeticNpmPackageBuild) {
+          return new MonoRepoInPlaceBuildDependencyInput(packageDirectory, packageJson, monoRepoBuild);
+        }
+        throw new Error(`Unrecognized type of NPM package build: ${monoRepoBuild}`);
+      }
+      return new NpmRepoDependencyInput(packageDirectory, packageJson, trans);
     });
   }
 
@@ -120,11 +128,20 @@ export abstract class NpmDependencyInput implements IBuildInput {
     }
   }
 
+  public abstract readonly isHashable: boolean;
+
+  public abstract build(): Promise<void>;
+
   protected abstract files(): Promise<FileSet>;
   protected abstract filesIdentifier(): Promise<string>;
 }
 
 class NpmRepoDependencyInput extends NpmDependencyInput {
+  public readonly isHashable = true;
+
+  public async build() {
+  }
+
   public files() {
     return cachedPromise(this, sourcesSym, () => {
       return FileSet.fromDirectoryWithIgnores(this.packageDirectory, ['node_modules']);
@@ -135,21 +152,52 @@ class NpmRepoDependencyInput extends NpmDependencyInput {
   }
 }
 
+/**
+ * Monorepo dependency that is not nozem-compatible
+ */
+class MonoRepoInPlaceBuildDependencyInput extends NpmDependencyInput {
+  public readonly isHashable = false;
+
+  constructor(packageDirectory: string,
+    packageJson: PackageJson,
+    private readonly packageBuild: NonHermeticNpmPackageBuild) {
+    super(packageDirectory, packageJson, {});
+  }
+
+  public async build() {
+    await this.packageBuild.build();
+  }
+
+  protected files(): Promise<FileSet> {
+    throw new Error(`Cannot get files of this directory -- it is not nozem-compatible`);
+  }
+
+  protected filesIdentifier(): Promise<string> {
+    throw new Error(`Cannot get hash of this directory -- it is not nozem-compatible`);
+  }
+}
+
 class MonoRepoBuildDependencyInput extends NpmDependencyInput {
+  public readonly isHashable = true;
+
   constructor(
     packageDirectory: string,
     packageJson: PackageJson,
     transitiveDeps: PromisedDependencies,
-    private readonly build: NpmPackageBuild) {
+    private readonly packageBuild: NozemNpmPackageBuild) {
       super(packageDirectory, packageJson, transitiveDeps);
   }
 
+  public async build() {
+    await this.packageBuild.build();
+  }
+
   public async files() {
-    return this.build.build();
+    return this.packageBuild.build();
   }
 
   public async filesIdentifier() {
-    return (await this.build.build()).hash();
+    return (await this.packageBuild.build()).hash();
   }
 }
 

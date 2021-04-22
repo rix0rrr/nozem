@@ -107,35 +107,12 @@ export class BuildDirectory {
   }
 
   public async execute(command: string, baseEnv: Record<string, string>, logDir: string) {
-    log.debug(`[${this.srcDir}] ${command}`);
-
     const env = {
       PATH: this.binDir,
       ...baseEnv
     };
 
-    try {
-      const { stdout, stderr } = await cpExec(command, {
-        cwd: this.srcDir,
-        env,
-      });
-
-      await fs.writeFile(path.join(logDir, 'stdout.log'), stdout, { encoding: 'utf-8' });
-      await fs.writeFile(path.join(logDir, 'stderr.log'), stderr, { encoding: 'utf-8' });
-    } catch (e) {
-      await flush(process.stdout);
-      process.stderr.write(`cmd:  ${command}\n`);
-      process.stderr.write(`cwd:  ${this.srcDir}\n`);
-      process.stderr.write(`env:  ${Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ')}\n`);
-      process.stderr.write(`exit: ${e.code}\n`);
-      if (e.stdout) { process.stderr.write(e.stdout); }
-      if (e.stderr) { process.stderr.write(e.stderr); }
-      await flush(process.stderr);
-
-      // The default error, when printed, will contain all stdout/stderr again. Replace it
-      // with an Error that's easier on the eyes.
-      throw new SimpleError(e.message.split('\n')[0]);
-    }
+    return shellExecute(command, this.srcDir, env, logDir);
   }
 
   public relativePath(p: string) {
@@ -147,5 +124,31 @@ async function flush(s: NodeJS.WriteStream) {
   const flushed = s.write('');
   if (!flushed) {
     return new Promise(ok => s.once('drain', ok));
+  }
+}
+
+export async function shellExecute(command: string, cwd: string, env: Record<string, string | undefined>, logDir?: string) {
+  log.debug(`[${cwd}] ${command}`);
+
+  try {
+    const { stdout, stderr } = await cpExec(command, { cwd, env });
+
+    if (logDir) {
+      await fs.writeFile(path.join(logDir, 'stdout.log'), stdout, { encoding: 'utf-8' });
+      await fs.writeFile(path.join(logDir, 'stderr.log'), stderr, { encoding: 'utf-8' });
+    }
+  } catch (e) {
+    await flush(process.stdout);
+    process.stderr.write(`cmd:  ${command}\n`);
+    process.stderr.write(`cwd:  ${cwd}\n`);
+    process.stderr.write(`env:  ${Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ')}\n`);
+    process.stderr.write(`exit: ${e.code}\n`);
+    if (e.stdout) { process.stderr.write(e.stdout); }
+    if (e.stderr) { process.stderr.write(e.stderr); }
+    await flush(process.stderr);
+
+    // The default error, when printed, will contain all stdout/stderr again. Replace it
+    // with an Error that's easier on the eyes.
+    throw new SimpleError(e.message.split('\n')[0]);
   }
 }

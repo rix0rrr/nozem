@@ -15,8 +15,18 @@ export class Workspace {
   constructor(public readonly root: string, private readonly packageJson: PackageJson | undefined) {
   }
 
+  /**
+   * Return a relative path from the workspace root to the given directory
+   */
   public relativePath(absPath: string) {
     return path.relative(this.root, path.resolve(absPath));
+  }
+
+  /**
+   * Return a relative path from the given path to the root of the workspace
+   */
+  public relativeToRoot(absPath: string) {
+    return path.relative(absPath, this.root);
   }
 
   public async npmPackageBuild(dir: string): Promise<NpmPackageBuild> {
@@ -30,6 +40,8 @@ export class Workspace {
   }
 
   public absoluteGlobalNonPackageFiles(relativeToDir: string): string[] {
+    if (!this.packageJson?.nozem) { return []; }
+
     return (this.packageJson?.nozem?.globalNonPackageFiles ?? []).map(p => path.relative(relativeToDir, path.join(this.root, p)));
   }
 }

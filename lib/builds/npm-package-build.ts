@@ -5,38 +5,53 @@ import { SourceInput } from "../inputs/input-source";
 import { NonPackageFileInput } from '../inputs/non-package-file';
 import { NpmDependencyInput } from "../inputs/npm-dependency";
 import { OsToolInput } from "../inputs/os-tool-input";
-import { FileSet, FileSetSchema, readJson, readJsonIfExists, standardHash, writeJson } from "../util/files";
-import { debug, info } from "../util/log";
-import { findNpmPackage, npmDependencies, readPackageJson } from "../util/npm";
-import { cachedPromise, partition, partitionT } from "../util/runtime";
-import { BuildDirectory, Workspace } from '../build-tools';
+import { FileSet, FileSetSchema, readJsonIfExists, standardHash, writeJson } from "../util/files";
+import { debug, info, warning } from "../util/log";
+import { findNpmPackage, npmBuildDependencies, readPackageJson } from "../util/npm";
+import { cachedPromise, mkdict, partition, partitionT } from "../util/runtime";
+import { BuildDirectory, shellExecute, Workspace } from '../build-tools';
+import { CumulativeTimer } from '../util/timer';
 
 const artifactsCacheSymbol = Symbol();
 const inputHashCacheSymbol = Symbol();
 
 const CACHE_FILE = '.nzm-buildcache';
 
+export const INSTALL_TIMER = new CumulativeTimer('install');
+export const BUILD_TIMER = new CumulativeTimer('build');
+export const TEST_TIMER = new CumulativeTimer('test');
+
 export interface BuildCacheSchema {
   readonly inputHash: string;
   readonly artifacts: FileSetSchema;
 }
 
-export class NpmPackageBuild {
-  /**
-   * Serves as a cache buster when something about the build logic changes
-   */
-  private static logicVersion = 1;
+export abstract class NpmPackageBuild {
 
   public static async fromDirectory(dir: string, workspace: Workspace): Promise<NpmPackageBuild> {
     const pj = await readPackageJson(dir);
+
+    const npmDependencyInputs = mkdict(await Promise.all(npmBuildDependencies(pj).map(async dep => {
+      const found = await findNpmPackage(dep, dir);
+      return [dep, await NpmDependencyInput.fromDirectory(workspace, found)] as const;
+    })));
+
+    if (pj.nozem === false) {
+      debug(`${dir}: nozem disabled in package.json`);
+      return new NonHermeticNpmPackageBuild(workspace, dir, pj, npmDependencyInputs);
+    }
+
+    if (Object.values(npmDependencyInputs).some(i => !i.isHashable)) {
+      debug(`${dir}: has unhashable dependencies`);
+      return new NonHermeticNpmPackageBuild(workspace, dir, pj, npmDependencyInputs);
+    }
 
     const inputs: Record<string, IBuildInput> = {};
     const sources = await FileSet.fromGitignored(dir, { directory: dir, patterns: ['.nzm-*'] });
     inputs.source = new SourceInput(sources);
 
-    for (const dep of npmDependencies(pj)) {
-      const found = await findNpmPackage(dep, dir);
-      inputs[`dep_${dep}`] = await NpmDependencyInput.fromDirectory(workspace, found);
+    for (const [dep, npmDependency] of Object.entries(npmDependencyInputs)) {
+      inputs[`dep_${dep}`] = npmDependency;
     }
 
     // NPM packages always need node
@@ -56,7 +71,7 @@ export class NpmPackageBuild {
 
     const env = NpmPackageBuild.determineEnv(pj.nozem?.env, pj.nozem?.ostools);
 
-    return new NpmPackageBuild(workspace, dir, pj, sources, inputs, env);
+    return new NozemNpmPackageBuild(workspace, dir, pj, sources, inputs, env);
   }
 
   private static determineEnv(envs?: Record<string, string>, ostools?: string[]) {
@@ -78,11 +93,67 @@ export class NpmPackageBuild {
     // Not strictly hermetic anymore, but it seems hard to achieve success otherwise
     // Running into variants of https://github.com/dotnet/sdk/issues/5658
     if (ostools?.includes('dotnet')) {
-      ret['DOTNET_CLI_HOME'] = 'dotnet_home';
+      ret['&DOTNET_CLI_HOME'] = process.env.HOME ?? '.';
     }
 
     return ret;
   }
+
+  public abstract build(): Promise<FileSet | void>;
+}
+
+export class NonHermeticNpmPackageBuild extends NpmPackageBuild {
+  private built = false;
+
+  constructor(
+    private readonly workspace: Workspace,
+    public readonly directory: string,
+    public readonly packageJson: PackageJson,
+    private readonly dependencies: Record<string, NpmDependencyInput>,
+    ) {
+    super();
+  }
+
+  public async build() {
+    if (this.built) { return; }
+    this.built = true;
+
+    // Need to make sure all dependencies have been built
+    for (const dep of Object.values(this.dependencies)) {
+      await dep.build();
+    }
+
+    warning(`uncacheable build ${this.packageJson.name}`);
+
+    const buildT = BUILD_TIMER.start();
+    try {
+      const buildCommand = this.packageJson.scripts?.build;
+      if (buildCommand) {
+        // FIXME: We force 'yarn' here, whereas we could also use npm. Not so nice?
+        await shellExecute('yarn build', this.directory, process.env);
+      }
+    } finally {
+      buildT.stop();
+    }
+
+    const testT = TEST_TIMER.start();
+    try {
+      const testCommand = this.packageJson.scripts?.test;
+      if (testCommand) {
+        // FIXME: We force 'yarn' here, whereas we could also use npm. Not so nice?
+        await shellExecute('yarn test', this.directory, process.env);
+      }
+    } finally {
+      testT.stop();
+    }
+  }
+}
+
+export class NozemNpmPackageBuild extends NpmPackageBuild {
+  /**
+   * Serves as a cache buster when something about the build logic changes
+   */
+  private static logicVersion = 1;
 
   constructor(
     private readonly workspace: Workspace,
@@ -91,16 +162,19 @@ export class NpmPackageBuild {
     private readonly sources: FileSet,
     private readonly inputs: Record<string, IBuildInput>,
     private readonly env: Record<string, string>) {
+    super();
   }
 
   public async inputHash() {
     return cachedPromise(this, inputHashCacheSymbol, async () => {
       const inputHash = standardHash();
-      inputHash.update(`version:${NpmPackageBuild.logicVersion}\n`);
+      inputHash.update(`version:${NozemNpmPackageBuild.logicVersion}\n`);
       for (const [k, v] of Object.entries(this.inputs)) {
         inputHash.update(`${k}:${await v.hash()}\n`);
       }
       for (const key of Object.keys(this.env).sort()) {
+        // Magic prefix to make keys not appear in the hash o_O NASTY NASTY
+        if (key.startsWith('&')) { continue; }
         inputHash.update(`${key}=${this.env[key]}\n`);
       }
       return inputHash.digest('hex');
@@ -134,22 +208,38 @@ export class NpmPackageBuild {
       // Create a file so that pkglint can find the root (because 'lerna.json' might not be there)
       await buildDir.touchFile('.nzmroot');
 
-      // Mirror the monorepo directory structure inside the build dir
-      await buildDir.moveSrcDir(this.workspace.relativePath(this.directory));
+      const installT = INSTALL_TIMER.start();
+      try {
+        // Mirror the monorepo directory structure inside the build dir
+        await buildDir.moveSrcDir(this.workspace.relativePath(this.directory));
 
-      await this.installDependencies(buildDir, Object.values(this.inputs));
+        await this.installDependencies(buildDir, Object.values(this.inputs));
+      } finally {
+        installT.stop();
+      }
 
       info(`building ${this.packageJson.name}`);
 
-      await patchTsConfig(buildDir.srcDir);
+      const buildT = BUILD_TIMER.start();
+      try {
+        await patchTsConfig(buildDir.srcDir);
 
-      const buildCommand = this.packageJson.scripts?.build;
-      if (buildCommand) {
-        await buildDir.execute(buildCommand, this.env, buildDir.directory);
+        const buildCommand = this.packageJson.scripts?.build;
+        if (buildCommand) {
+          await buildDir.execute(buildCommand, removeAmpersands(this.env), buildDir.directory);
+        }
+      } finally {
+        buildT.stop();
       }
-      const testCommand = this.packageJson.scripts?.test;
-      if (testCommand) {
-        await buildDir.execute(testCommand, this.env, buildDir.directory);
+
+      const testT = TEST_TIMER.start();
+      try {
+        const testCommand = this.packageJson.scripts?.test;
+        if (testCommand) {
+          await buildDir.execute(testCommand, removeAmpersands(this.env), buildDir.directory);
+        }
+      } finally {
+        testT.stop();
       }
 
       // Copy back new files to source directory
@@ -246,4 +336,9 @@ async function patchTsConfig(directory: string) {
   delete tsconfig.compilerOptions.inlineSources;
 
   await writeJson(filename, tsconfig);
+}
+
+function removeAmpersands(xs: Record<string, string>): Record<string, string> {
+  if (!xs) { return xs; }
+  return mkdict(Object.entries(xs).map(([k, v]) => [k.replace(/^&/, ''), v]));
 }
