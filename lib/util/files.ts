@@ -2,8 +2,10 @@ import { promises as fs, Stats } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as log from './log';
-import { cachedPromise, errorWithCode, escapeRegExp } from './runtime';
+import { cachedPromise, errorWithCode, escapeRegExp, mkdict } from './runtime';
 import { allGitIgnores, FilePattern, loadPatternFile } from './ignorefiles';
+import { IHashable, IMerkleTree, MerkleTree } from './merkle';
+import { PROMISE_POOL } from './concurrency';
 
 const hashSym = Symbol();
 
@@ -14,7 +16,7 @@ export interface FileSetSchema {
 /**
  * A set of files, relative to a directory
  */
-export class FileSet {
+export class FileSet implements IMerkleTree {
   public static fromSchema(dir: string, schema: FileSetSchema) {
     return new FileSet(dir, schema.relativePaths);
   }
@@ -40,8 +42,11 @@ export class FileSet {
     return FileSet.fromMatcher(directory, ignorePattern.toComplementaryMatcher());
   }
 
+  public readonly elements: Record<string, File>;
+
   constructor(public readonly root: string, public readonly fileNames: string[]) {
     this.fileNames.sort();
+    this.elements = mkdict(fileNames.map(fn => [fn, new File(path.join(root, fn))] as const));
   }
 
   public get fullPaths() {
@@ -59,7 +64,7 @@ export class FileSet {
   }
 
   public async copyTo(targetDir: string): Promise<FileSet> {
-    await promiseAllBatch(8, this.fileNames.map((f) => () => copy(
+    await PROMISE_POOL.all(this.fileNames.map((f) => () => copy(
         path.join(this.root, f),
         path.join(targetDir, f))));
 
@@ -75,22 +80,8 @@ export class FileSet {
     return new FileSet(this.root, this.fileNames.filter(f => !ignorePaths.has(f)));
   }
 
-  public async hash() {
-    return cachedPromise(this, hashSym, async () => {
-      const start = Date.now();
-
-      const d = standardHash();
-
-      // error: Uncaught Error: Too many open files (os error 24)
-      d.update(await this.fileHashes());
-
-      const delta = (Date.now() - start) / 1000;
-      if (delta > 2) {
-        log.warning(`Hashing ${this.root} (${this.fileNames.length} files) took ${delta.toFixed(1)}s`);
-      }
-
-      return d.digest('hex');
-    });
+  public hash(): Promise<string> {
+    return MerkleTree.hashTree(this);
   }
 
   public filter(pred: (x: string) => boolean): FileSet {
@@ -102,34 +93,35 @@ export class FileSet {
       relativePaths: this.fileNames,
     };
   }
+}
 
-  public async fileHashes() {
-    return (await promiseAllBatch(4, this.fileNames.map((file) => async () => {
-      const fullPath = path.join(this.root, file);
-      return `${file}\n${await fileHash(fullPath)}\n`;
-    }))).join('');
+export class File implements IHashable {
+  constructor(public readonly absPath: string) {
+  }
+
+  public hash(): Promise<string> {
+    return fileHash(this.absPath);
   }
 }
 
-const hashCache = new Map<string, string>();
+const hashCache = new Map<string, Promise<string>>();
 
 export async function fileHash(fullPath: string) {
-  /*
   const existing = hashCache.get(fullPath);
   if (existing) { return existing; }
-  */
 
-  const stats = await fs.lstat(fullPath);
-  const hash = standardHash();
-  if (stats.isSymbolicLink()) {
-    hash.update(await fs.readlink(fullPath));
-  } else {
-    hash.update(await fs.readFile(fullPath));
-  }
-  const ret = hash.digest('hex');
-  /*
+  const ret = PROMISE_POOL.queue(async () => {
+    const stats = await fs.lstat(fullPath);
+    const hash = standardHash();
+    if (stats.isSymbolicLink()) {
+      hash.update(await fs.readlink(fullPath));
+    } else {
+      hash.update(await fs.readFile(fullPath));
+    }
+    return hash.digest('hex');
+  });
+
   hashCache.set(fullPath, ret);
-  */
   return ret;
 }
 
@@ -332,51 +324,6 @@ export async function copy(src: string, target: string) {
   }
 }
 
-/**
- * Resolve a number of promises concurrently
- *
- * Some concurrency is good but too much concurrency actually breaks
- * (copying ~4k files concurrently completely locks up my machine).
- *
- * Control the concurrency.
- */
-async function promiseAllBatch<A>(n: number, thunks: Array<() => Promise<A>>): Promise<A[]> {
-  const ret: A[] = [];
-
-  let active = 0;
-  let next = 0;
-  let failed = false;
-  return new Promise((ok, ko) => {
-    function launchMore() {
-      if (failed) { return; }
-
-      // If there's no work left to do and nothing in progress, we're done
-      if (next === thunks.length && active === 0) {
-        ok(ret);
-      }
-
-      // Launch as many parallel "threads" as we can
-      while (active < n && next < thunks.length) {
-        const index = next++;
-        active++;
-
-        thunks[index]().then(result => {
-          active--;
-          ret[index] = result;
-          launchMore();
-        }).catch(fail);
-      }
-    }
-
-    function fail(e: Error) {
-      failed = true;
-      ko(e);
-    }
-
-    launchMore();
-  });
-}
-
 export function standardHash() {
   return crypto.createHash('sha1');
 }
@@ -451,7 +398,7 @@ export async function ignoreEnoent(block: () => Promise<void>): Promise<void> {
 export async function removeOldSubDirectories(n: number, dirName: string) {
   return ignoreEnoent(async () => {
     const entries = await fs.readdir(dirName);
-    const es = await promiseAllBatch(8, entries.map((e) => async () => {
+    const es = await PROMISE_POOL.all(entries.map((e) => async () => {
       const fullPath = path.join(dirName, e);
       return { fullPath, mtime: (await fs.lstat(fullPath)).mtimeMs };
     }));

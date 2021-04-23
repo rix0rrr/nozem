@@ -9,6 +9,7 @@ import { debug } from '../util/log';
 import { findNpmPackage, npmRuntimeDependencies, readPackageJson } from '../util/npm';
 import { cachedPromise } from '../util/runtime';
 import { IBuildInput } from './build-input';
+import { constantHashable, IHashable, IMerkleTree, MerkleTree } from '../util/merkle';
 
 const objectCache: any = {};
 const hashSym = Symbol();
@@ -17,7 +18,7 @@ const sourcesSym = Symbol();
 
 type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
 
-export abstract class NpmDependencyInput implements IBuildInput {
+export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
   public static async fromDirectory(workspace: Workspace, packageDirectory: string, alreadyIncluded?: string[]): Promise<NpmDependencyInput> {
     return cachedPromise(objectCache, packageDirectory, async () => {
       const packageJson = await readPackageJson(packageDirectory);
@@ -60,6 +61,21 @@ export abstract class NpmDependencyInput implements IBuildInput {
     public readonly transitiveDeps: PromisedDependencies) {
   }
 
+  public get elements(): Promise<Record<string, IHashable>> {
+    return new Promise(async (ok, ko) => {
+      try {
+        const ret: Record<string, IHashable> = {};
+        ret['@'] = constantHashable(this.filesIdentifier());
+        for (const [name, pkg] of Object.entries(this.transitiveDeps)) {
+          ret[name] = await pkg;
+        }
+        ok(ret);
+      } catch (e) {
+        ko(e);
+      }
+    });
+  }
+
   public get version(): string {
     return this.packageJson.version;
   }
@@ -74,12 +90,7 @@ export abstract class NpmDependencyInput implements IBuildInput {
 
   public async hash(): Promise<string> {
     return cachedPromise(this, hashSym, async () => {
-      const h = standardHash();
-      h.update(`files:${await this.filesIdentifier()}\n`);
-      for (const [name, pkg] of Object.entries(this.transitiveDeps)) {
-        h.update(`${name}:${await (await pkg).hash()}\n`);
-      }
-      return h.digest('hex');
+      return MerkleTree.hashTree(this);
     });
   }
 

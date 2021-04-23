@@ -6,11 +6,12 @@ import { NonPackageFileInput } from '../inputs/non-package-file';
 import { NpmDependencyInput } from "../inputs/npm-dependency";
 import { OsToolInput } from "../inputs/os-tool-input";
 import { FileSet, FileSetSchema, readJsonIfExists, standardHash, writeJson } from "../util/files";
-import { debug, info, warning } from "../util/log";
+import * as log from '../util/log';
 import { findNpmPackage, npmBuildDependencies, readPackageJson } from "../util/npm";
 import { cachedPromise, mkdict, partition, partitionT } from "../util/runtime";
 import { BuildDirectory, shellExecute, Workspace } from '../build-tools';
 import { CumulativeTimer } from '../util/timer';
+import { constantHashable, IHashable, MerkleDifference, MerkleTree, renderDifferences, SerializedMerkleTree } from '../util/merkle';
 
 const artifactsCacheSymbol = Symbol();
 const inputHashCacheSymbol = Symbol();
@@ -21,8 +22,17 @@ export const INSTALL_TIMER = new CumulativeTimer('install');
 export const BUILD_TIMER = new CumulativeTimer('build');
 export const TEST_TIMER = new CumulativeTimer('test');
 
+/**
+ * How far to recurse in the tree to track changes
+ *
+ * Less recursion saves space, and at some point more
+ * detail/history isn't really helpful/interesting anymore.
+ */
+const CHANGE_DETAIL_LEVELS = 4;
+
 export interface BuildCacheSchema {
   readonly inputHash: string;
+  readonly inputTree: SerializedMerkleTree;
   readonly artifacts: FileSetSchema;
 }
 
@@ -37,41 +47,51 @@ export abstract class NpmPackageBuild {
     })));
 
     if (pj.nozem === false) {
-      debug(`${dir}: nozem disabled in package.json`);
+      log.debug(`${dir}: nozem disabled in package.json`);
       return new NonHermeticNpmPackageBuild(workspace, dir, pj, npmDependencyInputs);
     }
 
     if (Object.values(npmDependencyInputs).some(i => !i.isHashable)) {
-      debug(`${dir}: has unhashable dependencies`);
+      log.debug(`${dir}: has unhashable dependencies`);
       return new NonHermeticNpmPackageBuild(workspace, dir, pj, npmDependencyInputs);
     }
 
-    const inputs: Record<string, IBuildInput> = {};
     const sources = await FileSet.fromGitignored(dir, { directory: dir, patterns: ['.nzm-*'] });
-    inputs.source = new SourceInput(sources);
+    const sourceInput = new SourceInput(sources);
 
-    for (const [dep, npmDependency] of Object.entries(npmDependencyInputs)) {
-      inputs[`dep_${dep}`] = npmDependency;
-    }
+    const deps = new MerkleTree(npmDependencyInputs);
 
+    const osTools = new MerkleTree(await Promise.all(
+      (pj.nozem?.ostools ?? []).map(async (name) =>
+      [name, await OsToolInput.fromExecutable(name)] as const
+    )));
     // NPM packages always need node
-    inputs[`os_node`] = await OsToolInput.fromExecutable('node');
-    // Other OS tools from package.json
-    for (const name of pj.nozem?.ostools ?? []) {
-      inputs[`os_${name}`] = await OsToolInput.fromExecutable(name);
-    }
+    osTools.add('node', await OsToolInput.fromExecutable('node'));
 
     // External files
-    for (const file of pj.nozem?.nonPackageFiles ?? []) {
-      inputs[`ext_${file}`] = new NonPackageFileInput(dir, file);
-    }
-    for (const file of workspace.absoluteGlobalNonPackageFiles(dir)) {
-      inputs[`ext_${file}`] = new NonPackageFileInput(dir, file);
-    }
+    const externalFiles = new MerkleTree([
+      ...(pj.nozem?.nonPackageFiles ?? []).map(file => [file, new NonPackageFileInput(dir, file)] as const),
+      ...workspace.absoluteGlobalNonPackageFiles(dir).map(file => [file, new NonPackageFileInput(dir, file)] as const),
+    ]);
 
     const env = NpmPackageBuild.determineEnv(pj.nozem?.env, pj.nozem?.ostools);
 
-    return new NozemNpmPackageBuild(workspace, dir, pj, sources, inputs, env);
+    const merkle = new MerkleTree({
+      source: sourceInput,
+      env: MerkleTree.fromDict(removeHiddenKeys(env)),
+      deps,
+      osTools,
+      externalFiles,
+    });
+
+    const inputs = [
+      sourceInput,
+      ...deps.values,
+      ...osTools.values,
+      ...externalFiles.values,
+    ];
+
+    return new NozemNpmPackageBuild(workspace, dir, pj, sources, inputs, env, merkle);
   }
 
   private static determineEnv(envs?: Record<string, string>, ostools?: string[]) {
@@ -123,7 +143,7 @@ export class NonHermeticNpmPackageBuild extends NpmPackageBuild {
       await dep.build();
     }
 
-    warning(`uncacheable build ${this.packageJson.name}`);
+    log.warning(`uncacheable build ${this.packageJson.name}`);
 
     const buildT = BUILD_TIMER.start();
     try {
@@ -160,43 +180,32 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     public readonly directory: string,
     public readonly packageJson: PackageJson,
     private readonly sources: FileSet,
-    private readonly inputs: Record<string, IBuildInput>,
-    private readonly env: Record<string, string>) {
+    private readonly inputs: IBuildInput[],
+    private readonly env: Record<string, string>,
+    private readonly merkle: MerkleTree<IHashable>,
+    ) {
     super();
+
+    this.merkle.add('v', constantHashable(`${NozemNpmPackageBuild.logicVersion}`));
   }
 
   public async inputHash() {
-    return cachedPromise(this, inputHashCacheSymbol, async () => {
-      const inputHash = standardHash();
-      inputHash.update(`version:${NozemNpmPackageBuild.logicVersion}\n`);
-      for (const [k, v] of Object.entries(this.inputs)) {
-        inputHash.update(`${k}:${await v.hash()}\n`);
-      }
-      for (const key of Object.keys(this.env).sort()) {
-        // Magic prefix to make keys not appear in the hash o_O NASTY NASTY
-        if (key.startsWith('&')) { continue; }
-        inputHash.update(`${key}=${this.env[key]}\n`);
-      }
-      return inputHash.digest('hex');
-    });
+    return this.merkle.hash();
   }
 
   public async build(): Promise<FileSet> {
     return cachedPromise(this, artifactsCacheSymbol, async () => {
-      debug(`Calculating inputHash for ${this.packageJson.name}`);
+      log.debug(`Calculating inputHash for ${this.packageJson.name}`);
       const inputHash = await this.inputHash();
 
       const cacheFile = path.join(this.directory, CACHE_FILE);
-      const cache: BuildCacheSchema | undefined = await readJsonIfExists(cacheFile);
-      if (cache && cache.inputHash === inputHash) {
-        debug(`Cached ${this.packageJson.name}`);
-        return FileSet.fromSchema(this.directory, cache.artifacts);
-      }
+      const cached = await this.cacheLookup(inputHash, cacheFile);
+      if (cached) { return cached; }
 
-      info(`will build ${this.packageJson.name}`);
       const artifacts = await this.doBuild();
       await writeJson(cacheFile, {
         inputHash,
+        inputTree: await MerkleTree.serialize(this.merkle, CHANGE_DETAIL_LEVELS),
         artifacts: artifacts.toSchema(),
       } as BuildCacheSchema);
       return artifacts;
@@ -218,7 +227,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
         installT.stop();
       }
 
-      info(`building ${this.packageJson.name}`);
+      log.info(`building ${this.packageJson.name}`);
 
       const buildT = BUILD_TIMER.start();
       try {
@@ -290,6 +299,38 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     await NpmDependencyInput.installAll(dir, bundled, dir.relativePath(dir.srcDir));
     await NpmDependencyInput.installAll(dir, other, '.');
   }
+
+  private async cacheLookup(inputHash: string, cacheFile: string): Promise<FileSet | undefined> {
+    try {
+      const cache: BuildCacheSchema | undefined = await readJsonIfExists(cacheFile);
+      if (!cache) {
+        log.info(`will build ${this.packageJson.name}`);
+        return undefined;
+      };
+
+      if (cache.inputHash === inputHash) {
+        log.debug(`Cached ${this.packageJson.name}`);
+        return FileSet.fromSchema(this.directory, cache.artifacts);
+      }
+
+      if (!cache.inputTree) {
+        log.info(`will build ${this.packageJson.name}`);
+        return undefined;
+      }
+
+      const comparison = await MerkleTree.compare(await MerkleTree.deserialize(cache.inputTree), this.merkle);
+      if (comparison.result === 'same') {
+        log.info(`will build ${this.packageJson.name}`);
+        return undefined;
+      }
+
+      log.info(`will build ${this.packageJson.name} (${renderDifferences(comparison.differences)})`);
+      return undefined;
+    } catch (e) {
+      log.error(`Error performing cache lookup for ${this.directory}`);
+      throw e;
+    }
+  }
 }
 
 function isNpmDependency(x: IBuildInput): x is NpmDependencyInput {
@@ -341,4 +382,9 @@ async function patchTsConfig(directory: string) {
 function removeAmpersands(xs: Record<string, string>): Record<string, string> {
   if (!xs) { return xs; }
   return mkdict(Object.entries(xs).map(([k, v]) => [k.replace(/^&/, ''), v]));
+}
+
+function removeHiddenKeys(xs: Record<string, string>): Record<string, string> {
+  if (!xs) { return xs; }
+  return mkdict(Object.entries(xs).filter(([k, v]) => !k.startsWith('&')));
 }

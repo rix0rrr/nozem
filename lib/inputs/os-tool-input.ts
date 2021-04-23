@@ -30,7 +30,7 @@ export class OsToolInput implements IBuildInput {
   }
 
   public hash(): Promise<string> {
-    return Promise.resolve(`${this.name}=${this.version}\n`);
+    return Promise.resolve(this.version);
   }
 
   public async install(dir: BuildDirectory): Promise<void> {
