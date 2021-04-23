@@ -47,7 +47,7 @@ async function main() {
   if (argv._.length > 0) {
     dirs = argv._;
   } else {
-    dirs = [workspaceRoot];
+    dirs = [process.cwd()];
   }
 
   if (dirs.length === 1 && path.resolve(dirs[0]) === workspaceRoot) {
@@ -68,13 +68,13 @@ async function main() {
 
     const build = await ws.npmPackageBuild(curDir);
     await build.build();
-
-    log.debug(`Build time: ${BUILD_TIMER.humanTime()}, test: ${TEST_TIMER.humanTime()}, hermetic install overhead: ${INSTALL_TIMER.humanTime()} (across ${BUILD_TIMER.invocations} invocations)`);
   }
+
+  log.debug(`Build time: ${BUILD_TIMER.humanTime()}, test: ${TEST_TIMER.humanTime()}, hermetic install overhead: ${INSTALL_TIMER.humanTime()} (across ${BUILD_TIMER.invocations} invocations)`);
 }
 
 async function findPackageDirectories(root: string) {
-  const lernaJson: LernaJson = await readJson('lerna.json');
+  const lernaJson: LernaJson = await readJson(path.join(root, 'lerna.json'));
   const packageJsonGlobs = lernaJson.packages.map(s => `./${s}/package.json`);
   const pjs = await FileSet.fromMatcher(root, new FilePatterns({
     directory: root,
