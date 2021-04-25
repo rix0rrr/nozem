@@ -32,9 +32,9 @@ export const TEST_TIMER = new CumulativeTimer('test');
 const CHANGE_DETAIL_LEVELS = 3;
 
 export interface BuildCacheSchema {
-  readonly inputHash: string;
   readonly inputTree: SerializedMerkleTree;
   readonly artifacts: FileSetSchema;
+  readonly artifactHash: string;
 }
 
 export abstract class NpmPackageBuild {
@@ -205,9 +205,9 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
 
       const artifacts = await this.doBuild();
       await writeJson(cacheFile, {
-        inputHash,
         inputTree: await MerkleTree.serialize(this.merkle, CHANGE_DETAIL_LEVELS),
         artifacts: artifacts.toSchema(),
+        artifactHash: await artifacts.hash(),
       } as BuildCacheSchema);
       return artifacts;
     });
@@ -304,22 +304,19 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
   private async cacheLookup(inputHash: string, cacheFile: string): Promise<FileSet | undefined> {
     try {
       const cache: BuildCacheSchema | undefined = await readJsonIfExists(cacheFile);
-      if (!cache) {
+      if (!cache || !cache.inputTree) {
         log.info(`will build ${this.packageJson.name}`);
         return undefined;
       };
 
-      if (cache.inputHash === inputHash) {
+      const prevInputTree = await MerkleTree.deserialize(cache.inputTree);
+
+      if (await prevInputTree.hash() === inputHash) {
         log.debug(`Cached ${this.packageJson.name}`);
         return FileSet.fromSchema(this.directory, cache.artifacts);
       }
 
-      if (!cache.inputTree) {
-        log.info(`will build ${this.packageJson.name}`);
-        return undefined;
-      }
-
-      const comparison = await MerkleTree.compare(await MerkleTree.deserialize(cache.inputTree), this.merkle);
+      const comparison = await MerkleTree.compare(prevInputTree, this.merkle);
       if (comparison.result === 'same') {
         log.info(`will build ${this.packageJson.name}`);
         return undefined;
