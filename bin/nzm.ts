@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as yargs from 'yargs';
 import { Workspace } from '../lib/build-tools/workspace';
 import { BUILD_TIMER, INSTALL_TIMER, TEST_TIMER } from '../lib/builds/npm-package-build';
+import { YarnInstall } from '../lib/builds/yarn-install';
 import { LernaJson } from '../lib/file-schemas';
 import { FilePatterns, FileSet, findFileUp, isProperChildOf, readJson } from '../lib/util/files';
 import { SimpleError } from '../lib/util/flow';
@@ -58,6 +59,8 @@ async function main() {
   }
 
   const ws = await Workspace.fromDirectory(workspaceRoot);
+
+  await new YarnInstall(workspaceRoot).install();
 
   for (const dir of dirs) {
     if (!isProperChildOf(dir, workspaceRoot)) {

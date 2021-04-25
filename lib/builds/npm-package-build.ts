@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import * as path from 'path';
 import { PackageJson, TsconfigJson } from "../file-schemas";
 import { IBuildInput } from "../inputs/build-input";
@@ -28,7 +29,7 @@ export const TEST_TIMER = new CumulativeTimer('test');
  * Less recursion saves space, and at some point more
  * detail/history isn't really helpful/interesting anymore.
  */
-const CHANGE_DETAIL_LEVELS = 4;
+const CHANGE_DETAIL_LEVELS = 3;
 
 export interface BuildCacheSchema {
   readonly inputHash: string;
@@ -324,7 +325,8 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
         return undefined;
       }
 
-      log.info(`will build ${this.packageJson.name} (${renderDifferences(comparison.differences)})`);
+      log.info(`will build ${this.packageJson.name} ` +
+        chalk.grey(`(${renderDifferences(comparison.differences)})`));
       return undefined;
     } catch (e) {
       log.error(`Error performing cache lookup for ${this.directory}`);
