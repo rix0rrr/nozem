@@ -6,7 +6,7 @@ import { SourceInput } from "../inputs/input-source";
 import { NonPackageFileInput } from '../inputs/non-package-file';
 import { NpmDependencyInput } from "../inputs/npm-dependency";
 import { OsToolInput } from "../inputs/os-tool-input";
-import { FileSet, FileSetSchema, readJsonIfExists, standardHash, writeJson } from "../util/files";
+import { FileSet, FileSetSchema, readJsonIfExists, standardHash, TEST_clearFileHashCache, writeJson } from "../util/files";
 import * as log from '../util/log';
 import { findNpmPackage, npmBuildDependencies, readPackageJson } from "../util/npm";
 import { cachedPromise, mkdict, partition, partitionT } from "../util/runtime";
@@ -204,11 +204,20 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       if (cached) { return cached; }
 
       const artifacts = await this.doBuild();
+      const artifactHash = await artifacts.hash();
       await writeJson(cacheFile, {
         inputTree: await MerkleTree.serialize(this.merkle, CHANGE_DETAIL_LEVELS),
         artifacts: artifacts.toSchema(),
-        artifactHash: await artifacts.hash(),
+        artifactHash,
       } as BuildCacheSchema);
+
+      // Do a validation -- we should remove this once we feel confident that shit works, or
+      // once we've better scoped the FS caching.
+      TEST_clearFileHashCache();
+      if (artifactHash !== await artifacts.hash()) {
+        log.error(`[BUG] The artifact hash was not consistent! (${artifactHash} vs ${await artifacts.hash()})`);
+      }
+
       return artifacts;
     });
   }
@@ -242,6 +251,18 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
         buildT.stop();
       }
 
+      // All the files that are there after the build step are the build result. We do this before
+      // testing etc because testing will create coverage reports etc which contain runtimes and
+      // the time of day, which are definitely not deterministic.
+      //
+      // The artifacts MAY include files that were source files.
+      // FIXME: We could be parsing .npmignore here (mucho correct) but right now
+      // it's simpler to say everything in the source dir is the output of this package build
+      // (will hash+copy more files than necessary, but oh well)
+      const buildResult = await FileSet.fromDirectoryWithIgnores(buildDir.srcDir, [
+        '*.tsbuildinfo',
+      ]);
+
       const testT = TEST_TIMER.start();
       try {
         const testCommand = this.packageJson.scripts?.test;
@@ -252,24 +273,20 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
         testT.stop();
       }
 
-      // Copy back new files to source directory
+      // Copy back new files to source directory (this DOES include test results)
       // FIXME: delete files in source directory that are "over" ?
 
-      const builtFiles = await FileSet.fromDirectory(buildDir.srcDir);
-      builtFiles.except(this.sources).copyTo(this.directory);
+      const allOutputFiles = await FileSet.fromDirectory(buildDir.srcDir);
+      allOutputFiles.except(this.sources).copyTo(this.directory);
 
-      // The artifacts may include something that was a source file.
-      // FIXME: We could be parsing .npmignore here (mucho correct) but right now
-      // it's simpler to say everything in the source dir is the output of this package build
-      // (will hash+copy more files than necessary, but oh well)
-
-      // Everything that's new in the srcDir is an artifact
-
-      // We make an exception for .ts files that have a corresponding .d.ts file.
-      // If we include the .ts file then downstream TypeScript compiler will prefer
+      // Remove .ts files that have a corresponding .d.ts file from the artifact set.
+      // (If we include the .ts file then downstream TypeScript compiler will prefer
       // the .ts files but they will reference types from devDependencies which may not
-      // be available.
-      return stripTypescriptSources(builtFiles.rebase(this.directory));
+      // be available).
+      //
+      // Note that we DID copy those files back, we're just not counting them as part
+      // of the artifacts of this build.
+      return stripTypescriptSources(buildResult.rebase(this.directory));
     });
   }
 
@@ -313,7 +330,16 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
 
       if (await prevInputTree.hash() === inputHash) {
         log.debug(`Cached ${this.packageJson.name}`);
-        return FileSet.fromSchema(this.directory, cache.artifacts);
+        const cachedArtifacts = FileSet.fromSchema(this.directory, cache.artifacts);
+
+        // Do a validation -- we don't control the files on disk since the cache stamp,
+        // who knows what happened to 'em?
+        const currentHash = await cachedArtifacts.hash();
+        if (currentHash !== cache.artifactHash) {
+          log.warning(`${this.directory}: artifact files changed since last build (${currentHash} vs ${cache.artifactHash})`);
+        }
+
+        return cachedArtifacts;
       }
 
       const comparison = await MerkleTree.compare(prevInputTree, this.merkle);

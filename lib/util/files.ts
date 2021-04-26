@@ -106,6 +106,10 @@ export class File implements IHashable {
 
 const hashCache = new Map<string, Promise<string>>();
 
+export function TEST_clearFileHashCache() {
+  hashCache.clear();
+}
+
 export async function fileHash(fullPath: string) {
   const existing = hashCache.get(fullPath);
   if (existing) { return existing; }
