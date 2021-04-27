@@ -32,6 +32,8 @@ export interface PjNozemOptions {
   readonly copyAllSourcesForTest?: boolean;
   readonly skipTsApiOptimization?: boolean;
   readonly env?: Record<string, string>;
+  readonly cacheBucket?: string;
+  readonly cacheBucketRegion?: string;
 }
 
 /**

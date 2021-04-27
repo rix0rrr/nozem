@@ -5,10 +5,14 @@ import { readPackageJson } from '../util/npm';
 import { NpmPackageBuild } from '../builds/npm-package-build';
 import { IArtifactCache } from '../caches/icache';
 import { DirectoryCache } from '../caches/directory-cache';
+import { CacheChain } from '../caches/cache-chain';
+import { S3Cache } from '../caches/s3cache';
 
 export interface WorkspaceOptions {
   readonly test: boolean;
 }
+
+const MAX_CACHE_SIZE_MB = 1000;
 
 export class Workspace {
   public readonly artifactCache: IArtifactCache;
@@ -24,9 +28,21 @@ export class Workspace {
     private readonly packageJson: PackageJson | undefined,
     public readonly options: WorkspaceOptions) {
 
-    this.artifactCache = DirectoryCache.default({
-      maxSizeMB: 1000,
+    const localCache = DirectoryCache.default({
+      maxSizeMB: MAX_CACHE_SIZE_MB,
     });
+
+    if (packageJson?.nozem !== false && packageJson?.nozem?.cacheBucket) {
+      this.artifactCache = new CacheChain(
+        localCache,
+        new S3Cache(
+          packageJson.nozem?.cacheBucket,
+          packageJson?.nozem.cacheBucketRegion ?? 'us-east-1'
+        ),
+      );
+    } else {
+      this.artifactCache = localCache;
+    }
   }
 
   /**
