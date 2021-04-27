@@ -157,15 +157,19 @@ export class NonHermeticNpmPackageBuild extends NpmPackageBuild {
       buildT.stop();
     }
 
-    const testT = TEST_TIMER.start();
-    try {
-      const testCommand = this.packageJson.scripts?.test;
-      if (testCommand) {
-        // FIXME: We force 'yarn' here, whereas we could also use npm. Not so nice?
-        await shellExecute('yarn test', this.directory, process.env);
+    if (this.workspace.options.test) {
+      const testT = TEST_TIMER.start();
+      try {
+        const testCommand = this.packageJson.scripts?.test;
+        if (testCommand) {
+          // FIXME: We force 'yarn' here, whereas we could also use npm. Not so nice?
+          await shellExecute('yarn test', this.directory, process.env);
+        }
+      } finally {
+        testT.stop();
       }
-    } finally {
-      testT.stop();
+    } else {
+      log.warning(`${this.directory}: skipping tests`);
     }
   }
 }
@@ -263,14 +267,18 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
         '*.tsbuildinfo',
       ]);
 
-      const testT = TEST_TIMER.start();
-      try {
-        const testCommand = this.packageJson.scripts?.test;
-        if (testCommand) {
-          await buildDir.execute(testCommand, removeAmpersands(this.env), buildDir.directory);
+      if (this.workspace.options.test) {
+        const testT = TEST_TIMER.start();
+        try {
+          const testCommand = this.packageJson.scripts?.test;
+          if (testCommand) {
+            await buildDir.execute(testCommand, removeAmpersands(this.env), buildDir.directory);
+          }
+        } finally {
+          testT.stop();
         }
-      } finally {
-        testT.stop();
+      } else {
+        log.warning(`${this.directory}: skipping tests`);
       }
 
       // Copy back new files to source directory (this DOES include test results)

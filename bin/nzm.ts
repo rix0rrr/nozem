@@ -26,6 +26,11 @@ async function main() {
       desc: 'Workspace root (determined from .git directory)',
       requiresArg: true,
     })
+    .option('test', {
+      type: 'boolean',
+      desc: 'Run tests as part of build',
+      default: true,
+    })
     .help()
     .strict()
     .showHelpOnFail(false)
@@ -58,7 +63,9 @@ async function main() {
     dirs = packageDirs;
   }
 
-  const ws = await Workspace.fromDirectory(workspaceRoot);
+  const ws = await Workspace.fromDirectory(workspaceRoot, {
+    test: argv.test,
+  });
 
   await new YarnInstall(workspaceRoot).install();
 

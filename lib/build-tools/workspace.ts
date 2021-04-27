@@ -4,15 +4,19 @@ import { exists } from '../util/files';
 import { readPackageJson } from '../util/npm';
 import { NpmPackageBuild } from '../builds/npm-package-build';
 
+export interface WorkspaceOptions {
+  readonly test: boolean;
+}
+
 export class Workspace {
   private packageBuildCache = new Map<string, NpmPackageBuild>();
 
-  public static async fromDirectory(root: string) {
+  public static async fromDirectory(root: string, options: WorkspaceOptions) {
     const pj = await exists(path.join(root, 'package.json')) ? await readPackageJson(root) : undefined;
-    return new Workspace(root, pj);
+    return new Workspace(root, pj, options);
   }
 
-  constructor(public readonly root: string, private readonly packageJson: PackageJson | undefined) {
+  constructor(public readonly root: string, private readonly packageJson: PackageJson | undefined, public readonly options: WorkspaceOptions) {
   }
 
   /**
