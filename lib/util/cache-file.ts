@@ -1,11 +1,11 @@
 import { readJsonIfExists, writeJson } from "./files";
 
-export class CacheFile<A> {
+export class CacheFile<A extends object> {
   constructor(private readonly fileName: string) {
   }
 
   public read(): Promise<A | undefined> {
-    return readJsonIfExists(this.fileName);
+    return readJsonIfExists<A>(this.fileName);
   }
 
   public write(content: A) {

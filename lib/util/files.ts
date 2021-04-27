@@ -93,6 +93,15 @@ export class FileSet implements IMerkleTree {
       relativePaths: this.fileNames,
     };
   }
+
+  /**
+   * Filter the list of files down to only files that actually exist
+   */
+  public async onlyExisting() {
+    const existing = await PROMISE_POOL.all(this.fileNames.map((f) => async () =>
+      exists(path.join(this.root, f))));
+    return new FileSet(this.root, this.fileNames.filter((_, i) => existing[i]));
+  }
 }
 
 export class File implements IHashable {
@@ -309,13 +318,14 @@ export class FilePatterns {
 
 export async function copy(src: string, target: string) {
   await fs.mkdir(path.dirname(target), { recursive: true });
+  const targetExists = await exists(target);
   let errorMessage = `Error copying ${src} -> ${target}`;
   try {
     const stat = await fs.lstat(src);
     if (stat.isSymbolicLink()) {
       const linkTarget = await fs.readlink(src);
       errorMessage = `Error copying symlink ${src} (${linkTarget}) -> ${target}`;
-      if (await exists(target)) {
+      if (targetExists) {
         await fs.unlink(target);
       }
       await fs.symlink(linkTarget, target);
@@ -359,6 +369,10 @@ export async function rimraf(x: string) {
   }
 }
 
+export async function ensureDirForFile(filePath: string) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+}
+
 export async function ensureSymlink(target: string, filePath: string, overwrite?: boolean) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   try {
@@ -378,7 +392,7 @@ export async function readJson(filename: string) {
   }
 }
 
-export async function readJsonIfExists(filename: string): Promise<any | undefined> {
+export async function readJsonIfExists<A extends object>(filename: string): Promise<A | undefined> {
   try {
     return JSON.parse(await fs.readFile(filename, { encoding: 'utf-8' }));
   } catch (e) {
@@ -387,7 +401,7 @@ export async function readJsonIfExists(filename: string): Promise<any | undefine
   }
 }
 
-export async function writeJson(filename: string, obj: any) {
+export async function writeJson<A extends any>(filename: string, obj: A) {
   await fs.writeFile(filename, JSON.stringify(obj, undefined, 2), { encoding: 'utf-8' });
 }
 
@@ -412,6 +426,35 @@ export async function removeOldSubDirectories(n: number, dirName: string) {
       await rimraf(first.fullPath);
     }
   });
+}
+
+export interface FileInfo {
+  readonly fullPath: string;
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+export async function allFilesRecursive(root: string): Promise<FileInfo[]> {
+  const ret = new Array<FileInfo>();
+  await recurse(root);
+  return ret;
+
+  async function recurse(dirName: string) {
+    const entries = await fs.readdir(dirName);
+    for (const e of entries) {
+      const fullPath = path.join(dirName, e);
+      const stat = await fs.lstat(fullPath);
+      if (stat.isDirectory()) {
+        await recurse(fullPath);
+      } else {
+        ret.push({ fullPath, mtimeMs: stat.mtimeMs, size: stat.size });
+      }
+    }
+  }
+}
+
+export function newestFirst(a: FileInfo, b: FileInfo) {
+  return b.mtimeMs - a.mtimeMs;
 }
 
 export async function pathExists(f: string) {

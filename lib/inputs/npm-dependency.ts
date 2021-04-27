@@ -144,6 +144,14 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
   public abstract build(): Promise<void>;
 
   protected abstract files(): Promise<FileSet>;
+
+  /**
+   * Unique identifier for the set of files backing this NPM dependency
+   *
+   * - For a built dependency, this is the artifact hash.
+   * - For a downloaded dependency, the version number of the package suffices
+   *   (because it is guaranteed to be unique by the NPM protocol).
+   */
   protected abstract filesIdentifier(): Promise<string>;
 }
 
@@ -188,7 +196,11 @@ class MonoRepoInPlaceBuildDependencyInput extends NpmDependencyInput {
   }
 }
 
-class MonoRepoBuildDependencyInput extends NpmDependencyInput {
+export function isMonoRepoBuildDependencyInput(x: IBuildInput): x is MonoRepoBuildDependencyInput {
+  return x instanceof MonoRepoBuildDependencyInput;
+}
+
+export class MonoRepoBuildDependencyInput extends NpmDependencyInput {
   public readonly isHashable = true;
 
   constructor(
@@ -208,7 +220,7 @@ class MonoRepoBuildDependencyInput extends NpmDependencyInput {
   }
 
   public async filesIdentifier() {
-    return (await this.packageBuild.build()).hash();
+    return this.packageBuild.artifactHash();
   }
 }
 

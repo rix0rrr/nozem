@@ -4,7 +4,7 @@ import { PackageJson, TsconfigJson } from "../file-schemas";
 import { IBuildInput } from "../inputs/build-input";
 import { SourceInput } from "../inputs/input-source";
 import { NonPackageFileInput } from '../inputs/non-package-file';
-import { NpmDependencyInput } from "../inputs/npm-dependency";
+import { isMonoRepoBuildDependencyInput, MonoRepoBuildDependencyInput, NpmDependencyInput } from "../inputs/npm-dependency";
 import { OsToolInput } from "../inputs/os-tool-input";
 import { FileSet, FileSetSchema, readJsonIfExists, standardHash, TEST_clearFileHashCache, writeJson } from "../util/files";
 import * as log from '../util/log';
@@ -12,10 +12,12 @@ import { findNpmPackage, npmBuildDependencies, readPackageJson } from "../util/n
 import { cachedPromise, mkdict, partition, partitionT } from "../util/runtime";
 import { BuildDirectory, shellExecute, Workspace } from '../build-tools';
 import { CumulativeTimer } from '../util/timer';
-import { constantHashable, IHashable, MerkleDifference, MerkleTree, renderDifferences, SerializedMerkleTree } from '../util/merkle';
+import { constantHashable, IHashable, MerkleComparison, MerkleDifference, MerkleTree, renderComparison, SerializedMerkleTree } from '../util/merkle';
+import { ICachedArtifacts } from '../caches/icache';
 
 const artifactsCacheSymbol = Symbol();
 const inputHashCacheSymbol = Symbol();
+const cacheLookupSymbol = Symbol();
 
 const CACHE_FILE = '.nzm-buildcache';
 
@@ -35,6 +37,12 @@ export interface BuildCacheSchema {
   readonly inputTree: SerializedMerkleTree;
   readonly artifacts: FileSetSchema;
   readonly artifactHash: string;
+
+  /**
+   * This is strictly speaking not necessary, but we need this to debug
+   * strange build behavior
+   */
+  readonly artifactTree: SerializedMerkleTree;
 }
 
 export abstract class NpmPackageBuild {
@@ -180,6 +188,8 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
    */
   private static logicVersion = 1;
 
+  private readonly packageName: string;
+
   constructor(
     private readonly workspace: Workspace,
     public readonly directory: string,
@@ -191,33 +201,58 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     ) {
     super();
 
+    this.packageName = this.packageJson.name;
+
     this.merkle.add('v', constantHashable(`${NozemNpmPackageBuild.logicVersion}`));
   }
 
-  public async inputHash() {
-    return this.merkle.hash();
+  public async inputHash(): Promise<string> {
+    return cachedPromise(this, inputHashCacheSymbol, async () => {
+      log.debug(`Calculating inputHash for ${this.packageJson.name}`);
+      return this.merkle.hash();
+    });
+  }
+
+  public async artifactHash(): Promise<string> {
+    // If we can get this build from the cache, we can get the artifact hash
+    // quickly. Otherwise, we need to do a build.
+
+    const cached = await this.cacheLookup();
+    if (cached) { return cached.artifactHash; }
+
+    return await (await this.build()).hash();
   }
 
   public async build(): Promise<FileSet> {
     return cachedPromise(this, artifactsCacheSymbol, async () => {
-      log.debug(`Calculating inputHash for ${this.packageJson.name}`);
-      const inputHash = await this.inputHash();
+      const cached = await this.cacheLookup();
+      if (cached) {
+        // Even if we didn't build this package, we do have to make sure that
+        // all dependencies are put into place (either built or also downloaded)
+        await this.ensureDependenciesBuilt();
 
-      const cacheFile = path.join(this.directory, CACHE_FILE);
-      const cached = await this.cacheLookup(inputHash, cacheFile);
-      if (cached) { return cached; }
+        const files = await cached.fetch(this.directory);
+        // Register an in-place copy of these files after fetching them
+        if (cached.source !== 'inplace') {
+          await this.storeInPlaceCache(files);
+        }
+        return files;
+      }
 
       const artifacts = await this.doBuild();
-      const artifactHash = await artifacts.hash();
-      await writeJson(cacheFile, {
-        inputTree: await MerkleTree.serialize(this.merkle, CHANGE_DETAIL_LEVELS),
-        artifacts: artifacts.toSchema(),
-        artifactHash,
-      } as BuildCacheSchema);
+
+      await this.storeInPlaceCache(artifacts);
+
+      // Store in external cache
+      this.workspace.artifactCache.queueForStoring({
+        inputHash: await this.inputHash(),
+        displayName: this.packageJson.name,
+      }, artifacts);
 
       // Do a validation -- we should remove this once we feel confident that shit works, or
       // once we've better scoped the FS caching.
       TEST_clearFileHashCache();
+      const artifactHash = await artifacts.hash();
       if (artifactHash !== await artifacts.hash()) {
         log.error(`[BUG] The artifact hash was not consistent! (${artifactHash} vs ${await artifacts.hash()})`);
       }
@@ -332,45 +367,105 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     await NpmDependencyInput.installAll(dir, other, '.');
   }
 
-  private async cacheLookup(inputHash: string, cacheFile: string): Promise<FileSet | undefined> {
+  private async ensureDependenciesBuilt(): Promise<void> {
+    const [npmDependencies, _] = partition(Object.values(this.inputs), isNpmDependency);
+    const buildableNpmDependencies = npmDependencies.filter(isMonoRepoBuildDependencyInput);
+    await Promise.all(buildableNpmDependencies.map(d => d.build()));
+  }
+
+  private async cacheLookup(): Promise<ICachedArtifacts | undefined> {
+    return cachedPromise(this, cacheLookupSymbol, async () => {
+      const inplaceCache = await this.inPlaceCacheLookup();
+      if (inplaceCache.result === 'ok') {
+        log.debug(`Unchanged ${this.packageJson.name}`);
+        return {
+          source: 'inplace',
+          artifactHash: await inplaceCache.files.hash(),
+          // Files are by definition already in the right place, so fetch doesn't
+          // move or copy.
+          fetch: (targetDir) => Promise.resolve(inplaceCache.files),
+        } as ICachedArtifacts;
+      }
+
+      const fromRemoteCache = await this.workspace.artifactCache.lookup({
+        inputHash: await this.inputHash(),
+      });
+      if (fromRemoteCache) {
+        log.info(`From cache ${this.packageJson.name}`);
+        return fromRemoteCache;
+      }
+
+      // We failed both cache lookups. The error message we print depends on
+      // the state of the in-place cache.
+      switch (inplaceCache.result) {
+        case 'mismatch':
+          log.info(`will build ${this.packageJson.name} ` +
+            chalk.grey(`(${renderComparison(inplaceCache.comparison, 1)})`));
+          return undefined;
+        default:
+          log.info(`will build ${this.packageJson.name}`);
+          return undefined;
+      }
+    });
+  }
+
+  private async inPlaceCacheLookup(): Promise<InPlaceCacheLookup> {
+    const inputHash = await this.inputHash();
+
     try {
-      const cache: BuildCacheSchema | undefined = await readJsonIfExists(cacheFile);
-      if (!cache || !cache.inputTree) {
-        log.info(`will build ${this.packageJson.name}`);
-        return undefined;
-      };
+      // Try in-place cache
+      const cache = await readJsonIfExists<BuildCacheSchema>(this.inPlaceCacheFile);
+      if (!cache || !cache.inputTree) { return { result: 'missing' }; };
 
       const prevInputTree = await MerkleTree.deserialize(cache.inputTree);
 
       if (await prevInputTree.hash() === inputHash) {
-        log.debug(`Cached ${this.packageJson.name}`);
-        const cachedArtifacts = FileSet.fromSchema(this.directory, cache.artifacts);
+        // Account for the fact that some files may have disappeared
+        const cachedArtifacts = await FileSet.fromSchema(this.directory, cache.artifacts).onlyExisting();
 
         // Do a validation -- we don't control the files on disk since the cache stamp,
         // who knows what happened to 'em?
         const currentHash = await cachedArtifacts.hash();
         if (currentHash !== cache.artifactHash) {
           log.warning(`${this.directory}: artifact files changed since last build (${currentHash} vs ${cache.artifactHash})`);
+          if (cache.artifactTree) {
+            const oldArtifactTree = await MerkleTree.deserialize(cache.artifactTree);
+            const comparison = await MerkleTree.compare(oldArtifactTree, cachedArtifacts);
+            log.warning(`Changes: ${renderComparison(comparison)}`);
+          }
+          return { result: 'missing' };
         }
 
-        return cachedArtifacts;
+        return { result: 'ok', files: cachedArtifacts };
       }
 
       const comparison = await MerkleTree.compare(prevInputTree, this.merkle);
-      if (comparison.result === 'same') {
-        log.info(`will build ${this.packageJson.name}`);
-        return undefined;
-      }
+      return { result: 'mismatch', comparison: comparison };
 
-      log.info(`will build ${this.packageJson.name} ` +
-        chalk.grey(`(${renderDifferences(comparison.differences)})`));
-      return undefined;
     } catch (e) {
       log.error(`Error performing cache lookup for ${this.directory}`);
       throw e;
     }
   }
+
+  private async storeInPlaceCache(artifacts: FileSet) {
+    await writeJson<BuildCacheSchema>(this.inPlaceCacheFile, {
+      inputTree: await MerkleTree.serialize(this.merkle, CHANGE_DETAIL_LEVELS),
+      artifacts: artifacts.toSchema(),
+      artifactHash: await artifacts.hash(),
+      artifactTree: await MerkleTree.serialize(artifacts),
+    });
+  }
+
+  private get inPlaceCacheFile(): string  {
+    return path.join(this.directory, CACHE_FILE);
+  }
 }
+
+type InPlaceCacheLookup = { readonly result: 'missing' }
+  | { readonly result: 'ok', readonly files: FileSet }
+  | { readonly result: 'mismatch', readonly comparison: MerkleComparison };
+
 
 function isNpmDependency(x: IBuildInput): x is NpmDependencyInput {
   return x instanceof NpmDependencyInput;

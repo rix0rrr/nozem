@@ -5,9 +5,9 @@ import { promises as fs } from 'fs';
 import * as tar from 'tar';
 
 import { exists } from '../util/files';
-import { IRemoteCache, PackageVersion } from '../build-tools/remote-cache';
+import { CacheLocator, IArtifactCache } from './icache';
 
-export class S3Cache implements IRemoteCache {
+export class S3Cache implements IArtifactCache {
   private readonly s3: import('aws-sdk').S3;
 
   constructor(private readonly bucketName: string, region?: string, profileName?: string) {
@@ -20,7 +20,7 @@ export class S3Cache implements IRemoteCache {
     this.s3 = new (require('aws-sdk')).S3({ region });
   }
 
-  public async contains(pv: PackageVersion): Promise<boolean> {
+  public async contains(pv: CacheLocator): Promise<boolean> {
     // Must do listObject not getObject to avoid creating a false negative cache entry
     const response = await this.s3.listObjectsV2({
       Bucket: this.bucketName,
@@ -31,7 +31,7 @@ export class S3Cache implements IRemoteCache {
     return (response.KeyCount ?? 0) > 0;
   }
 
-  public async fetch(pv: PackageVersion, targetDir: string): Promise<void> {
+  public async fetch(pv: CacheLocator, targetDir: string): Promise<void> {
     await fs.mkdir(targetDir, { recursive: true });
     return new Promise((ok, ko) => this.s3.getObject({
       Bucket: this.bucketName,
@@ -44,7 +44,7 @@ export class S3Cache implements IRemoteCache {
       .on('error', ko));
   }
 
-  public queueForStoring(pv: PackageVersion, sourceDir: string): void {
+  public queueForStoring(pv: CacheLocator, sourceDir: string): void {
     const start = Date.now();
 
     exists(sourceDir).then(dirExists => {
@@ -69,7 +69,7 @@ export class S3Cache implements IRemoteCache {
     });
   }
 
-  private objectLocation(pv: PackageVersion) {
+  private objectLocation(pv: CacheLocator) {
     return `nozem/${keyify(pv.relativePath)}/${pv.inputHash}.tgz`;
   }
 }

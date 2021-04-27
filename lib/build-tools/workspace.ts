@@ -3,12 +3,15 @@ import { PackageJson } from '../file-schemas';
 import { exists } from '../util/files';
 import { readPackageJson } from '../util/npm';
 import { NpmPackageBuild } from '../builds/npm-package-build';
+import { IArtifactCache } from '../caches/icache';
+import { DirectoryCache } from '../caches/directory-cache';
 
 export interface WorkspaceOptions {
   readonly test: boolean;
 }
 
 export class Workspace {
+  public readonly artifactCache: IArtifactCache;
   private packageBuildCache = new Map<string, NpmPackageBuild>();
 
   public static async fromDirectory(root: string, options: WorkspaceOptions) {
@@ -16,7 +19,14 @@ export class Workspace {
     return new Workspace(root, pj, options);
   }
 
-  constructor(public readonly root: string, private readonly packageJson: PackageJson | undefined, public readonly options: WorkspaceOptions) {
+  constructor(
+    public readonly root: string,
+    private readonly packageJson: PackageJson | undefined,
+    public readonly options: WorkspaceOptions) {
+
+    this.artifactCache = DirectoryCache.default({
+      maxSizeMB: 1000,
+    });
   }
 
   /**

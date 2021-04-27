@@ -180,13 +180,17 @@ function isIterable(x: unknown): x is Iterable<any> {
   return typeof (x as any)[Symbol.iterator] === 'function';
 }
 
-export function renderDifferences(differences: MerkleDifference[]): string {
-  if (differences.length === 0) { return 'no difference'; }
+export function renderComparison(comp: MerkleComparison, maxDetail?: number): string {
+  if (comp.result === 'same' || comp.differences.length === 0) { return 'no difference'; }
 
-  return [
-    renderDifference(differences[0]),
-    differences.length > 1 ? ` and ${differences.length - 1} more` : '',
-  ].join('');
+  if (maxDetail) {
+    return [
+      comp.differences.slice(0, maxDetail).map(renderDifference).join(', '),
+      comp.differences.length > 1 ? ` and ${comp.differences.length - 1} more` : '',
+    ].join('');
+  } else {
+    return comp.differences.map(renderDifference).join(', ');
+  }
 }
 
 function renderDifference(difference: MerkleDifference): string {
