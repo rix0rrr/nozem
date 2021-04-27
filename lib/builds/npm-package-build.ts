@@ -264,7 +264,13 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       // it's simpler to say everything in the source dir is the output of this package build
       // (will hash+copy more files than necessary, but oh well)
       const buildResult = await FileSet.fromDirectoryWithIgnores(buildDir.srcDir, [
+        // This thing is created by TypeScript and will contain timestamps and other
+        // nondeterministic stuff.
         '*.tsbuildinfo',
+
+        // We will have patched this file, and we should definitely not overwrite
+        // those changes back to the source dir.
+        'tsconfig.json',
       ]);
 
       if (this.workspace.options.test) {
@@ -285,7 +291,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       // FIXME: delete files in source directory that are "over" ?
 
       const allOutputFiles = await FileSet.fromDirectory(buildDir.srcDir);
-      allOutputFiles.except(this.sources).copyTo(this.directory);
+      await allOutputFiles.except(this.sources).copyTo(this.directory);
 
       // Remove .ts files that have a corresponding .d.ts file from the artifact set.
       // (If we include the .ts file then downstream TypeScript compiler will prefer
