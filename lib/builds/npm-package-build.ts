@@ -391,7 +391,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
         inputHash: await this.inputHash(),
       });
       if (fromRemoteCache) {
-        log.info(`From cache ${this.packageJson.name}`);
+        log.info(`From cache ${this.packageJson.name} (${fromRemoteCache.source})`);
         return fromRemoteCache;
       }
 

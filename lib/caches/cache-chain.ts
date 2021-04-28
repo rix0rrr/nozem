@@ -8,6 +8,7 @@ export class CacheChain implements IArtifactCache {
   }
 
   public async lookup(pv: CacheLocator): Promise<ICachedArtifacts | undefined> {
+    // Lookup from first
     for (const cache of this.caches) {
       const r = await cache.lookup(pv);
       if (r) { return r; }
