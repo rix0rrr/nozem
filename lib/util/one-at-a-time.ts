@@ -24,7 +24,7 @@ export class OneAtATime {
 
     this._running = true;
     this._queued = true;
-    (async () => {
+    void(async () => {
       try {
         while (this._queued) {
           try {

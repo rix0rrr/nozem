@@ -49,8 +49,32 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
     });
   }
 
-  public static fromMonoRepoBuild(npmBuild: NpmPackageBuild) {
+  /**
+   * Install hoisted
+   */
+  public static async installAll(dir: BuildDirectory, npmDependencies: NpmDependencyInput[], subdir: string = '.') {
+    // Turn list into map
+    const deps: PromisedDependencies = {};
+    for (const dep of npmDependencies) {
+      deps[dep.name] = Promise.resolve(dep);
+    }
+    // Build tree from map and hoist
+    const packageTree = await buildNaiveTree(deps);
+    hoistDependencies(packageTree);
+
+    // Install
+    await this.installDependencyTree(dir, subdir, packageTree.dependencies ?? {});
   }
+
+  private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: NpmDependencyTree) {
+    for (const [key, dep] of Object.entries(tree)) {
+      const depDir = path.join(subdir, 'node_modules', key);
+      await dep.npmDependency.installInto(dir, depDir);
+      await this.installDependencyTree(dir, depDir, dep.dependencies ?? {});
+    }
+  }
+
+  public abstract readonly isHashable: boolean;
 
   constructor(
     protected readonly packageDirectory: string,
@@ -98,31 +122,6 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
     return this.installInto(dir, path.join('node_modules', this.name));
   }
 
-  /**
-   * Install hoisted
-   */
-  public static async installAll(dir: BuildDirectory, npmDependencies: NpmDependencyInput[], subdir: string = '.') {
-    // Turn list into map
-    const deps: PromisedDependencies = {};
-    for (const dep of npmDependencies) {
-      deps[dep.name] = Promise.resolve(dep);
-    }
-    // Build tree from map and hoist
-    const packageTree = await buildNaiveTree(deps);
-    hoistDependencies(packageTree);
-
-    // Install
-    await this.installDependencyTree(dir, subdir, packageTree.dependencies ?? {});
-  }
-
-  private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: NpmDependencyTree) {
-    for (const [key, dep] of Object.entries(tree)) {
-      const depDir = path.join(subdir, 'node_modules', key);
-      await dep.npmDependency.installInto(dir, depDir);
-      await this.installDependencyTree(dir, depDir, dep.dependencies ?? {});
-    }
-  }
-
   private async installInto(dir: BuildDirectory, subdir: string): Promise<void> {
     const files = await this.files();
     await dir.addFiles(files, subdir);
@@ -138,8 +137,6 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
       }
     }
   }
-
-  public abstract readonly isHashable: boolean;
 
   public abstract build(): Promise<void>;
 
@@ -239,11 +236,11 @@ function isMonoRepoPackage(packageDirectory: string) {
  *  A
  *   +- B
  */
-async function buildNaiveTree(deps: PromisedDependencies): Promise<NpmDependencyNode> {
+async function buildNaiveTree(baseDeps: PromisedDependencies): Promise<NpmDependencyNode> {
   return {
     version: '*',
     npmDependency: undefined as any, // <-- OH NO. This is never looked at anyway, don't know how to make this better.
-    dependencies: await recurse(deps, []),
+    dependencies: await recurse(baseDeps, []),
   };
 
   async function recurse(deps: PromisedDependencies, cycle: string[]) {

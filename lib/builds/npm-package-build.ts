@@ -220,7 +220,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     const cached = await this.cacheLookup();
     if (cached) { return cached.artifactHash; }
 
-    return await (await this.build()).hash();
+    return (await this.build()).hash();
   }
 
   public async build(): Promise<FileSet> {

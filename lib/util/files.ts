@@ -24,7 +24,7 @@ export class FileSet implements IMerkleTree {
   public static async fromGitignored(root: string, ...extraIgnores: FilePattern[]) {
     const matcher = await IgnoreFileMatcher.fromGitignore(root);
     matcher.addPatterns(...extraIgnores);
-    return await FileSet.fromMatcher(root, matcher);
+    return FileSet.fromMatcher(root, matcher);
   }
 
   public static async fromMatcher(root: string, matcher: FileMatcher) {
@@ -59,6 +59,7 @@ export class FileSet implements IMerkleTree {
 
   public print() {
     for (const f of this.fileNames) {
+      // eslint-disable-next-line no-console
       console.log(f);
     }
   }
@@ -207,14 +208,14 @@ function globToRegex(pattern: string) {
  * Will load more ignore-files as it's encountering them.
  */
 export class IgnoreFileMatcher implements FileMatcher {
-  private readonly directoriesLoaded = new Set<string>();
-  private readonly patterns = new FilePatterns();
-
   public static async fromGitignore(dir: string) {
     const gitRoot = await findFileUp('.git', dir);
     if (!gitRoot) { throw new Error(`Could not find '.git' upwards of: ${dir}`); }
     return new IgnoreFileMatcher('.gitignore', path.dirname(gitRoot));
   }
+
+  private readonly directoriesLoaded = new Set<string>();
+  private readonly patterns = new FilePatterns();
 
   constructor(private readonly patternFileName: string, private readonly rootDirectory: string) {
   }

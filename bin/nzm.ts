@@ -98,6 +98,7 @@ main().catch(e => {
   if (e instanceof SimpleError) {
     error(e.message);
   } else {
+    // eslint-disable-next-line no-console
     console.error(e);
   }
   process.exitCode = 1;

@@ -133,7 +133,7 @@ export class MerkleTree<A extends IHashable> implements IMerkleTree {
     if (isIterable(elements)) {
       this.elements = mkdict(elements);
     } else {
-      this.elements = {...elements};
+      this.elements = { ...elements };
     }
   }
 

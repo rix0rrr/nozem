@@ -1,3 +1,4 @@
+/* eslint-disable quote-props */
 import * as path from 'path';
 import { FilePatterns, FileMatcher } from "../lib/util/files";
 

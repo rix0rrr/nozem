@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 import chalk = require('chalk');
 
 let verbose = false;

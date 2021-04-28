@@ -20,7 +20,7 @@ export async function findNpmPackage(packageName: string, root: string): Promise
   while (true) {
     const loc = path.join(dir, 'node_modules', packageName);
     if (await exists(path.join(loc, 'package.json'))) {
-      return await fs.realpath(loc);
+      return fs.realpath(loc);
     }
 
     const next = path.dirname(dir);

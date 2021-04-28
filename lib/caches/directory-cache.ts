@@ -13,11 +13,11 @@ export interface DirectoryCacheOptions {
 }
 
 export class DirectoryCache implements IArtifactCache {
-  private cleaning = new OneAtATime();
-
   public static default(options: DirectoryCacheOptions = {}) {
     return new DirectoryCache(path.join(os.homedir(), '.cache', 'nozem', 'local'), options);
   }
+
+  private cleaning = new OneAtATime();
 
   constructor(private readonly directory: string, private readonly options: DirectoryCacheOptions = {}) {
   }

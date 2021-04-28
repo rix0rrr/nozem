@@ -50,7 +50,7 @@ export async function loadPatternFile(file: string): Promise<FilePattern> {
  * Load a set of pattern files, from the least specific to the most specific
  */
 export async function loadPatternFiles(...files: string[]): Promise<FilePattern[]> {
-  return await Promise.all(files.map(loadPatternFile));
+  return Promise.all(files.map(loadPatternFile));
 }
 
 /**

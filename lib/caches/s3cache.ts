@@ -21,6 +21,7 @@ export class S3Cache implements IArtifactCache {
       process.env.AWS_PROFILE = profileName;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     this.s3 = new (require('aws-sdk')).S3({ region });
     this.indexDirectory = path.join(os.homedir(), '.cache', 'nozem', 's3index', bucketName);
     this.startS3IndexScan();
@@ -107,7 +108,7 @@ export class S3Cache implements IArtifactCache {
    * Mirror the remote S3 index to a local directory
    */
   private startS3IndexScan() {
-    (async () => {
+    void(async () => {
       let continuationToken = undefined;
       while (true) {
         const response: import('aws-sdk').S3.ListObjectsV2Output = await this.s3.listObjectsV2({

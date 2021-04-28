@@ -15,13 +15,13 @@ export interface WorkspaceOptions {
 const MAX_CACHE_SIZE_MB = 1000;
 
 export class Workspace {
-  public readonly artifactCache: IArtifactCache;
-  private packageBuildCache = new Map<string, NpmPackageBuild>();
-
   public static async fromDirectory(root: string, options: WorkspaceOptions) {
     const pj = await exists(path.join(root, 'package.json')) ? await readPackageJson(root) : undefined;
     return new Workspace(root, pj, options);
   }
+
+  public readonly artifactCache: IArtifactCache;
+  private packageBuildCache = new Map<string, NpmPackageBuild>();
 
   constructor(
     public readonly root: string,

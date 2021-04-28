@@ -102,8 +102,8 @@ export class BuildDirectory {
   /**
    * Grab artifacts out of an in-source build
    */
-  public async inSourceArtifacts(matcher: FileMatcher) {
-    return await FileSet.fromMatcher(this.srcDir, matcher);
+  public inSourceArtifacts(matcher: FileMatcher) {
+    return FileSet.fromMatcher(this.srcDir, matcher);
   }
 
   public async execute(command: string, baseEnv: Record<string, string>, logDir: string) {
