@@ -1,6 +1,6 @@
 {
   "name": "nozem",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "",
   "main": "dist/lib/index.js",
   "directories": {
