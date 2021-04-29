@@ -47,6 +47,7 @@ async function main() {
 
     workspaceRoot = path.dirname(gitDir);
   }
+  workspaceRoot = path.resolve(workspaceRoot);
   debug(`Monorepo root: ${workspaceRoot}`);
 
   let dirs: string[];
