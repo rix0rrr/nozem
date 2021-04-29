@@ -65,7 +65,8 @@ async function main() {
   // matter much, and this improves cache efficiency by a lot.
   process.env.CODEBUILD_RESOLVED_SOURCE_VERSION = 'built.by.nzm';
 
-  debug(`Monorepo root: ${workspaceRoot}`);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  debug(`[nozem v${require('../package.json').version}] Workspace root: ${workspaceRoot}`);
 
   let dirs: string[];
   if (argv._.length > 0) {
