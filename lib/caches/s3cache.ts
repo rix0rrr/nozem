@@ -80,8 +80,6 @@ export class S3Cache implements IArtifactCache {
   public queueForStoring(pv: CacheLocator, files: FileSet): void {
     if (!this._enabled || !this._writeEnabled) { return; }
 
-    log.debug(`Storing ${JSON.stringify(pv)}`);
-
     const start = Date.now();
 
     void(async () => {
