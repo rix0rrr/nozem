@@ -66,7 +66,7 @@ async function main() {
   process.env.CODEBUILD_RESOLVED_SOURCE_VERSION = 'built.by.nzm';
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  debug(`[nozem v${require('../package.json').version}] Workspace root: ${workspaceRoot}`);
+  debug(`[nozem v${require('../../package.json').version}] Workspace root: ${workspaceRoot}`);
 
   let dirs: string[];
   if (argv._.length > 0) {
