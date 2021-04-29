@@ -5,6 +5,7 @@ import * as log from '../util/log';
 import * as tar from 'tar';
 import { S3 } from '@aws-sdk/client-s3';
 import { fromIni, parseKnownFiles } from '@aws-sdk/credential-provider-ini';
+import { fromEnv } from '@aws-sdk/credential-provider-env';
 import { awsAuthMiddleware, awsAuthMiddlewareOptions } from '@aws-sdk/middleware-signing';
 import { readStream, s3BodyToStream } from '../util/streams';
 
@@ -146,19 +147,24 @@ export class S3Cache implements IArtifactCache {
       const profileName = `${this.bucketName}-profile`;
       const profiles = await parseKnownFiles({});
       const haveProfile = !!profiles[profileName];
+      const haveEnv = process.env.AWS_ACCESS_KEY_ID;
 
       if (haveProfile) {
         log.debug(`Using S3 cache '${this.bucketName}' with profile '${profileName}'`);
         credentials = fromIni({ profile: profileName });
+      } else if (haveEnv) {
+        log.debug(`Using S3 cache '${this.bucketName}' using $AWS_ACCESS_KEY_ID credentials (tried profile '${profileName}')`);
+        credentials = fromEnv();
       } else {
-        log.debug(`Using S3 cache '${this.bucketName}' anonymously (add credentials to profile '${profileName}')`);
+        log.debug(`Using S3 cache '${this.bucketName}' anonymously (tried profile '${profileName}')`);
         credentials = () => Promise.resolve(new Credentials({ accessKeyId: '', secretAccessKey: '' }));
       }
 
       this._s3 = new S3({ region: this.region, credentials });
 
-      if (!haveProfile) {
-        // Replace AWSAuth middleware with one that doesn't do signing
+      if (!haveProfile && !haveEnv) {
+        // Replace AWSAuth middleware with one that doesn't do signing to effectively be
+        // anonymous.
         this._s3.middlewareStack.addRelativeTo(awsAuthMiddleware({
           credentials,
           signer: () => Promise.resolve({
