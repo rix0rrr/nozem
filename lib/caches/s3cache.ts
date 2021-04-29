@@ -5,10 +5,12 @@ import * as log from '../util/log';
 import * as tar from 'tar';
 import { S3 } from '@aws-sdk/client-s3';
 import { fromIni, parseKnownFiles } from '@aws-sdk/credential-provider-ini';
+import { awsAuthMiddleware, awsAuthMiddlewareOptions } from '@aws-sdk/middleware-signing';
 import { readStream, s3BodyToStream } from '../util/streams';
 
 import { ensureDirForFile, exists, FileSet, FileSetSchema, readJsonIfExists } from '../util/files';
 import { CacheLocator, IArtifactCache, ICachedArtifacts } from './icache';
+import { Credentials } from 'aws-sdk';
 
 export class S3Cache implements IArtifactCache {
   private _s3?: S3;
@@ -59,7 +61,7 @@ export class S3Cache implements IArtifactCache {
 
       return (response.KeyCount ?? 0) > 0;
     } catch (e) {
-      log.warning(`S3 error: ${e}`);
+      log.warning(`S3 error: ${e} (s3 cache disabled)`);
       this._enabled = false;
       return false;
     }
@@ -110,11 +112,9 @@ export class S3Cache implements IArtifactCache {
         });
 
         const delta = (Date.now() - start) / 1000;
-        log.debug(`Downloaded s3://${this.bucketName}/${remoteKey} in ${delta.toFixed(1)}s`);
+        log.debug(`Uploaded s3://${this.bucketName}/${remoteKey} in ${delta.toFixed(1)}s`);
       } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(e);
-        log.debug(`S3 error: ${e}`);
+        log.debug(`S3 error: ${e} (s3 writes disabled)`);
         this._writeEnabled = false;
       }
     })();
@@ -141,14 +141,33 @@ export class S3Cache implements IArtifactCache {
 
   private async s3() {
     if (!this._s3) {
+      let credentials;
+
       const profileName = `${this.bucketName}-profile`;
       const profiles = await parseKnownFiles({});
-      const credentials = profiles[profileName] ? fromIni({ profile: profileName }) : undefined;
-      if (!credentials) {
-        log.debug(`Profile for S3 cache not found: ${profileName}`);
+      const haveProfile = !!profiles[profileName];
+
+      if (haveProfile) {
+        log.debug(`Using S3 cache '${this.bucketName}' with profile '${profileName}'`);
+        credentials = fromIni({ profile: profileName });
+      } else {
+        log.debug(`Using S3 cache '${this.bucketName}' anonymously (add credentials to profile '${profileName}')`);
+        credentials = () => Promise.resolve(new Credentials({ accessKeyId: '', secretAccessKey: '' }));
       }
 
       this._s3 = new S3({ region: this.region, credentials });
+
+      if (!haveProfile) {
+        // Replace AWSAuth middleware with one that doesn't do signing
+        this._s3.middlewareStack.addRelativeTo(awsAuthMiddleware({
+          credentials,
+          signer: () => Promise.resolve({
+            sign: (request) => Promise.resolve(request),
+          }),
+          signingEscapePath: false,
+          systemClockOffset: 0,
+        }), awsAuthMiddlewareOptions);
+      }
     }
     return this._s3;
   }
@@ -179,7 +198,7 @@ export class S3Cache implements IArtifactCache {
           continuationToken = response.NextContinuationToken;
         }
       } catch (e) {
-        log.warning(`Error in background: ${e}`);
+        log.warning(`S3 error: ${e} (s3 cache disabled)`);
         this._enabled = false;
       }
     })();
