@@ -103,6 +103,27 @@ async function findPackageDirectories(root: string) {
   return pjs.fullPaths.map(path.dirname);
 }
 
+// We cache promises, so errors in cached promises are sometimes only handled asynchronously
+// (taking longer than an event loop tick to attach a .catch() handler to a promise--or to be await'ed).
+// By default, Node will complain about them. Silence that behavior:
+// only complain about the error if it takes longer than 100ms to attach a handler
+(() => {
+  const WARNING_TIMERS = new Map<Promise<any>, NodeJS.Timeout>();
+  process.on('unhandledRejection', (e, promise) => {
+    const handle = setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.error('Unhandled promise rejection', e);
+    }, 100);
+    WARNING_TIMERS.set(promise, handle);
+  });
+  process.on('rejectionHandled', (promise) => {
+    const handle = WARNING_TIMERS.get(promise);
+    if (handle) { window.clearTimeout(handle); }
+    WARNING_TIMERS.delete(promise);
+  });
+})();
+
+
 main().catch(e => {
   if (e instanceof SimpleError) {
     error(e.message);
