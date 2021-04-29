@@ -51,10 +51,19 @@ async function main() {
   }
   workspaceRoot = path.resolve(workspaceRoot);
 
+  /*
   if (await exists(path.join(workspaceRoot, '.git'))) {
     // $CODEBUILD_RESOLVED_SOURCE_VERSION may be used by scripts, set it here
     process.env.CODEBUILD_RESOLVED_SOURCE_VERSION = await gitHeadRevision(workspaceRoot);
   }
+  */
+  // Well shit. In CDK's build, `aws-cdk` (the CLI) depends on the git commit hash. `aws-cdk` in turn
+  // is used by `cdk-integ-tools`, which in turn is used by EVERY OTHER PACKAGE.
+  // This means that the mere changing of the commit hash invalidates the build cache for nearly every
+  // package, regardless of its source. This is obvioulsy No Good. For now, hard-code the commit
+  // hash to a constant string--we're not using `nzm` to build for release right now so it doesn't
+  // matter much, and this improves cache efficiency by a lot.
+  process.env.CODEBUILD_RESOLVED_SOURCE_VERSION = 'built.by.nzm';
 
   debug(`Monorepo root: ${workspaceRoot}`);
 
