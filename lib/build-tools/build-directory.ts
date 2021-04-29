@@ -131,7 +131,12 @@ export async function shellExecute(command: string, cwd: string, env: Record<str
   log.debug(`[${cwd}] ${command}`);
 
   try {
-    const { stdout, stderr } = await cpExec(command, { cwd, env });
+    const { stdout, stderr } = await cpExec(command, {
+      cwd,
+      env,
+      // The CLI tests get pretty spewy, default of 200k is not enough
+      maxBuffer: 5_000_000,
+    });
 
     if (logDir) {
       await fs.writeFile(path.join(logDir, 'stdout.log'), stdout, { encoding: 'utf-8' });
