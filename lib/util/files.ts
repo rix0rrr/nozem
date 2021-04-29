@@ -21,10 +21,10 @@ export class FileSet implements IMerkleTree {
     return new FileSet(dir, schema.relativePaths);
   }
 
-  public static async fromGitignored(root: string, ...extraIgnores: FilePattern[]) {
-    const matcher = await IgnoreFileMatcher.fromGitignore(root);
+  public static async fromGitignored(directory: string, workspaceRoot: string, ...extraIgnores: FilePattern[]) {
+    const matcher = await IgnoreFileMatcher.fromGitignore(directory, workspaceRoot);
     matcher.addPatterns(...extraIgnores);
-    return FileSet.fromMatcher(root, matcher);
+    return FileSet.fromMatcher(directory, matcher);
   }
 
   public static async fromMatcher(root: string, matcher: FileMatcher) {
@@ -208,8 +208,8 @@ function globToRegex(pattern: string) {
  * Will load more ignore-files as it's encountering them.
  */
 export class IgnoreFileMatcher implements FileMatcher {
-  public static async fromGitignore(dir: string) {
-    const gitRoot = await findFileUp('.git', dir);
+  public static async fromGitignore(dir: string, gitRoot?: string) {
+    if (!gitRoot) { gitRoot = await findFileUp('.git', dir); }
     if (!gitRoot) { throw new Error(`Could not find '.git' upwards of: ${dir}`); }
     return new IgnoreFileMatcher('.gitignore', path.dirname(gitRoot));
   }

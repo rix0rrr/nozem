@@ -19,7 +19,7 @@ const sourcesSym = Symbol();
 type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
 
 export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
-  public static async fromDirectory(workspace: Workspace, packageDirectory: string, alreadyIncluded?: string[]): Promise<NpmDependencyInput> {
+  public static fromDirectory(workspace: Workspace, packageDirectory: string, alreadyIncluded?: string[]): Promise<NpmDependencyInput> {
     return cachedPromise(objectCache, packageDirectory, async () => {
       const packageJson = await readPackageJson(packageDirectory);
 

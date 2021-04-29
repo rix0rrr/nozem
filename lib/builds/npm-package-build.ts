@@ -65,7 +65,7 @@ export abstract class NpmPackageBuild {
       return new NonHermeticNpmPackageBuild(workspace, dir, pj, npmDependencyInputs);
     }
 
-    const sources = await FileSet.fromGitignored(dir, { directory: dir, patterns: ['.nzm-*'] });
+    const sources = await FileSet.fromGitignored(dir, workspace.root, { directory: dir, patterns: ['.nzm-*'] });
     const sourceInput = new SourceInput(sources);
 
     const deps = new MerkleTree(npmDependencyInputs);
