@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import * as path from 'path';
 import * as yargs from 'yargs';
+import { shellExecute } from '../lib/build-tools';
 import { Workspace } from '../lib/build-tools/workspace';
 import { BUILD_TIMER, INSTALL_TIMER, TEST_TIMER } from '../lib/builds/npm-package-build';
 import { YarnInstall } from '../lib/builds/yarn-install';
 import { LernaJson } from '../lib/file-schemas';
-import { FilePatterns, FileSet, findFileUp, isProperChildOf, readJson } from '../lib/util/files';
+import { exists, FilePatterns, FileSet, findFileUp, isProperChildOf, readJson } from '../lib/util/files';
 import { SimpleError } from '../lib/util/flow';
+import { gitHeadRevision } from '../lib/util/git';
 import * as log from '../lib/util/log';
 import { debug, error, setVerbose } from '../lib/util/log';
 
@@ -48,6 +50,12 @@ async function main() {
     workspaceRoot = path.dirname(gitDir);
   }
   workspaceRoot = path.resolve(workspaceRoot);
+
+  if (await exists(path.join(workspaceRoot, '.git'))) {
+    // $CODEBUILD_RESOLVED_SOURCE_VERSION may be used by scripts, set it here
+    process.env.CODEBUILD_RESOLVED_SOURCE_VERSION = await gitHeadRevision(workspaceRoot);
+  }
+
   debug(`Monorepo root: ${workspaceRoot}`);
 
   let dirs: string[];
