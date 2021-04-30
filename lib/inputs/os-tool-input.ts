@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { BuildDirectory } from '../build-tools/build-directory';
 import { exists } from '../util/files';
+import * as log from '../util/log';
 import { cachedPromise } from '../util/runtime';
 import { IBuildInput } from './build-input';
 
@@ -35,5 +36,17 @@ export class OsToolInput implements IBuildInput {
 
   public async install(dir: BuildDirectory): Promise<void> {
     await dir.installExecutable(this.location, this.name);
+
+    // Make an exception for Docker. On macOS it seems 'com.docker.cli' is also necessary
+    // for some versions of Docker to work properly. Not exactly clear how or why, but
+    // let's just go with it.
+    if (this.name === 'docker') {
+      try {
+        const alsoInstall = 'com.docker.cli';
+        await dir.installExecutable(await OsToolInput.findExecutable(alsoInstall), alsoInstall);
+      } catch (e) {
+        log.debug(`${e}`);
+      }
+    }
   }
 }

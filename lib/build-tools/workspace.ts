@@ -7,9 +7,11 @@ import { IArtifactCache } from '../caches/icache';
 import { DirectoryCache } from '../caches/directory-cache';
 import { CacheChain } from '../caches/cache-chain';
 import { S3Cache } from '../caches/s3cache';
+import { NullCache } from '../caches/null-cache';
 
 export interface WorkspaceOptions {
   readonly test: boolean;
+  readonly cache: boolean;
 }
 
 const MAX_CACHE_SIZE_MB = 1000;
@@ -28,20 +30,25 @@ export class Workspace {
     private readonly packageJson: PackageJson | undefined,
     public readonly options: WorkspaceOptions) {
 
-    const localCache = DirectoryCache.default({
-      maxSizeMB: MAX_CACHE_SIZE_MB,
-    });
 
-    if (packageJson?.nozem !== false && packageJson?.nozem?.cacheBucket) {
-      this.artifactCache = new CacheChain(
-        localCache,
-        new S3Cache(
-          packageJson.nozem?.cacheBucket,
-          packageJson?.nozem.cacheBucketRegion ?? 'us-east-1'
-        ),
-      );
+    if (options.cache) {
+      const localCache = DirectoryCache.default({
+        maxSizeMB: MAX_CACHE_SIZE_MB,
+      });
+
+      if (packageJson?.nozem !== false && packageJson?.nozem?.cacheBucket) {
+        this.artifactCache = new CacheChain(
+          localCache,
+          new S3Cache(
+            packageJson.nozem?.cacheBucket,
+            packageJson?.nozem.cacheBucketRegion ?? 'us-east-1'
+          ),
+        );
+      } else {
+        this.artifactCache = localCache;
+      }
     } else {
-      this.artifactCache = localCache;
+      this.artifactCache = new NullCache();
     }
   }
 

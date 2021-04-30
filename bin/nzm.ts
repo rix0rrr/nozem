@@ -34,6 +34,11 @@ async function main() {
       desc: 'Run tests as part of build',
       default: true,
     })
+    .option('cache', {
+      type: 'boolean',
+      desc: 'Whether to use machine/s3 caches',
+      default: true,
+    })
     .help()
     .strict()
     .showHelpOnFail(false)
@@ -86,6 +91,7 @@ async function main() {
 
   const ws = await Workspace.fromDirectory(workspaceRoot, {
     test: argv.test,
+    cache: argv.cache,
   });
 
   await new YarnInstall(workspaceRoot, packages).install();
