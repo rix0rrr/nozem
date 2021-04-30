@@ -196,7 +196,7 @@ export function renderComparison(comp: MerkleComparison, maxDetail?: number): st
 function renderDifference(difference: MerkleDifference): string {
   return [
     difference.type === 'add' ? '+' : (difference.type === 'remove' ? '-' : ''),
-    difference.path.join('/'),
+    difference.path.join(':'),
     difference.type === 'change' ? ` ${difference.oldHash.substr(0, 8)} -> ${difference.newHash.substr(0, 8)}` : '',
   ].join('');
 }

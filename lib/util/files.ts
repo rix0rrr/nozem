@@ -139,6 +139,15 @@ export async function fileHash(fullPath: string) {
   return ret;
 }
 
+export class HashableFile implements IHashable {
+  constructor(public readonly fileName: string) {
+  }
+
+  public hash(): Promise<string> {
+    return fileHash(this.fileName);
+  }
+}
+
 export interface FileMatcher {
   visitDirectory(name: string): boolean | Promise<boolean>;
   visitFile(name: string): boolean | Promise<boolean>;

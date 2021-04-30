@@ -11,6 +11,7 @@ import { SimpleError } from '../lib/util/flow';
 import { gitHeadRevision } from '../lib/util/git';
 import * as log from '../lib/util/log';
 import { debug, error, setVerbose } from '../lib/util/log';
+import { findMonoRepoPackages } from '../lib/util/monorepo';
 
 async function main() {
   const argv = yargs
@@ -75,18 +76,19 @@ async function main() {
     dirs = [process.cwd()];
   }
 
+  const packages = await findMonoRepoPackages(workspaceRoot);
+
   if (dirs.length === 1 && path.resolve(dirs[0]) === workspaceRoot) {
-    const packageDirs = await findPackageDirectories(workspaceRoot);
-    log.debug(`Found ${packageDirs.length} packages`);
     // FIXME: toposort
-    dirs = packageDirs;
+    log.debug(`Building ${packages.length} packages`);
+    dirs = packages.map(p => p.fullPath);
   }
 
   const ws = await Workspace.fromDirectory(workspaceRoot, {
     test: argv.test,
   });
 
-  await new YarnInstall(workspaceRoot).install();
+  await new YarnInstall(workspaceRoot, packages).install();
 
   for (const dir of dirs) {
     if (!isProperChildOf(dir, workspaceRoot)) {
@@ -100,17 +102,6 @@ async function main() {
   }
 
   log.debug(`Build time: ${BUILD_TIMER.humanTime()}, test: ${TEST_TIMER.humanTime()}, hermetic install overhead: ${INSTALL_TIMER.humanTime()} (across ${BUILD_TIMER.invocations} invocations)`);
-}
-
-async function findPackageDirectories(root: string) {
-  const lernaJson: LernaJson = await readJson(path.join(root, 'lerna.json'));
-  const packageJsonGlobs = lernaJson.packages.map(s => `./${s}/package.json`);
-  const pjs = await FileSet.fromMatcher(root, new FilePatterns({
-    directory: root,
-    patterns: ['*/', '!node_modules', ...packageJsonGlobs],
-  }).toIncludeMatcher());
-
-  return pjs.fullPaths.map(path.dirname);
 }
 
 // We cache promises, so errors in cached promises are sometimes only handled asynchronously
