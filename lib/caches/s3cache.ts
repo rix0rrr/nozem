@@ -145,26 +145,29 @@ export class S3Cache implements IArtifactCache {
       const profileName = `${this.bucketName}-profile`;
       const profiles = await parseKnownFiles({});
       const haveProfile = !!profiles[profileName];
-      const haveEnv = process.env.AWS_ACCESS_KEY_ID || process.env.CODEBUILD_CI;
 
+      let anonymous = false;
       if (haveProfile) {
         log.debug(`Using S3 cache '${this.bucketName}' with profile '${profileName}'`);
         credentials = fromIni({ profile: profileName });
-      } else if (haveEnv) {
-        log.debug(`Using S3 cache '${this.bucketName}' using $AWS_ACCESS_KEY_ID credentials (tried profile '${profileName}')`);
+      } else if (process.env.AWS_ACCESS_KEY_ID) {
+        // Explicitly don't try to hit EC2 metadata service
+        log.debug(`Using S3 cache '${this.bucketName}' with $AWS_ACCESS_KEY_ID credentials (tried profile '${profileName}')`);
         credentials = fromEnv();
+      } else if (process.env.CODEBUILD_CI) {
+        log.debug(`Using S3 cache '${this.bucketName}' with ambient credentials (tried profile '${profileName}')`);
       } else {
         log.debug(`Using S3 cache '${this.bucketName}' anonymously (tried profile '${profileName}')`);
-        credentials = () => Promise.resolve(new Credentials({ accessKeyId: '', secretAccessKey: '' }));
+        anonymous = true;
       }
 
       this._s3 = new S3({ region: this.region, credentials });
 
-      if (!haveProfile && !haveEnv) {
+      if (anonymous) {
         // Replace AWSAuth middleware with one that doesn't do signing to effectively be
         // anonymous.
         this._s3.middlewareStack.addRelativeTo(awsAuthMiddleware({
-          credentials,
+          credentials: () => Promise.resolve(new Credentials({ accessKeyId: '', secretAccessKey: '' })),
           signer: () => Promise.resolve({
             sign: (request) => Promise.resolve(request),
           }),
