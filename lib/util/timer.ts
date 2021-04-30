@@ -18,7 +18,7 @@
     if (!this.running) { return; }
     this.running = false;
 
-    this.timeMs = (Date.now() - this.startTime) / 1000;
+    this.timeMs = this.elapsedSinceStart();
     this.onStop?.(this);
   }
 
@@ -27,8 +27,13 @@
   }
 
   public humanTime() {
+    if (this.running) { return humanTime(this.elapsedSinceStart()); }
     if (!this.timeMs) { return '???'; }
     return humanTime(this.timeMs);
+  }
+
+  private elapsedSinceStart() {
+    return (Date.now() - this.startTime) / 1000;
   }
 }
 

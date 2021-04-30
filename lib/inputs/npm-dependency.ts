@@ -67,11 +67,11 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
   }
 
   private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: NpmDependencyTree) {
-    for (const [key, dep] of Object.entries(tree)) {
+    await Promise.all(Object.entries(tree).map(async ([key, dep]) => {
       const depDir = path.join(subdir, 'node_modules', key);
       await dep.npmDependency.installInto(dir, depDir);
       await this.installDependencyTree(dir, depDir, dep.dependencies ?? {});
-    }
+    }));
   }
 
   public abstract readonly isHashable: boolean;
@@ -123,7 +123,14 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
   }
 
   private async installInto(dir: BuildDirectory, subdir: string): Promise<void> {
-    const files = await this.files();
+    // Remove .ts files that have a corresponding .d.ts file from the artifact set.
+    // (If we include the .ts file then downstream TypeScript compiler will prefer
+    // the .ts files but they will reference types from devDependencies which may not
+    // be available).
+    //
+    // Note that we DID copy those files back, we're just not counting them as part
+    // of the artifacts of this build.
+    const files = stripTypescriptSources(await this.files());
     await dir.addFiles(files, subdir);
 
     if (typeof this.packageJson.bin === 'string') {
@@ -269,3 +276,27 @@ interface NpmNodeInfo {
 type NpmDependencyNode = DependencyNode<NpmNodeInfo>;
 
 export type NpmDependencyTree = DependencySet<NpmNodeInfo>;
+
+/**
+ * Strip files that will mess up downstream TypeScript compilation
+ */
+function stripTypescriptSources(fs: FileSet) {
+  return fs.filter(not(f =>
+    // .ts file for which a .d.ts file also exists
+    (isTypescriptSourceFile(f) && fs.fileNames.includes(makeTypescriptDeclarationFile(f)))
+    // tsconfig but only in the root
+    || (f == 'tsconfig.json')
+  ));
+}
+
+function makeTypescriptDeclarationFile(x: string) {
+  return x.replace(/\.ts$/, '.d.ts');
+}
+
+function isTypescriptSourceFile(x: string) {
+  return x.endsWith('.ts') && !x.endsWith('.d.ts');
+}
+
+function not<A>(fn: (x: A) => boolean): (x: A) => boolean {
+  return (x) => !fn(x);
+}

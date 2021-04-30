@@ -328,14 +328,8 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       const allOutputFiles = await FileSet.fromDirectory(buildDir.srcDir);
       await allOutputFiles.except(this.sources).copyTo(this.directory);
 
-      // Remove .ts files that have a corresponding .d.ts file from the artifact set.
-      // (If we include the .ts file then downstream TypeScript compiler will prefer
-      // the .ts files but they will reference types from devDependencies which may not
-      // be available).
-      //
-      // Note that we DID copy those files back, we're just not counting them as part
-      // of the artifacts of this build.
-      return stripTypescriptSources(buildResult.rebase(this.directory));
+      // Return only the files built during the 'build' step as artifacts
+      return buildResult.rebase(this.directory);
     });
   }
 
@@ -469,30 +463,6 @@ type InPlaceCacheLookup = { readonly result: 'missing' }
 
 function isNpmDependency(x: IBuildInput): x is NpmDependencyInput {
   return x instanceof NpmDependencyInput;
-}
-
-/**
- * Strip files that will mess up downstream TypeScript compilation
- */
-function stripTypescriptSources(fs: FileSet) {
-  return fs.filter(not(f =>
-    // .ts file for which a .d.ts file also exists
-    (isTypescriptSourceFile(f) && fs.fileNames.includes(makeTypescriptDeclarationFile(f)))
-    // tsconfig but only in the root
-    || (f == 'tsconfig.json')
-  ));
-}
-
-function makeTypescriptDeclarationFile(x: string) {
-  return x.replace(/\.ts$/, '.d.ts');
-}
-
-function isTypescriptSourceFile(x: string) {
-  return x.endsWith('.ts') && !x.endsWith('.d.ts');
-}
-
-function not<A>(fn: (x: A) => boolean): (x: A) => boolean {
-  return (x) => !fn(x);
 }
 
 /**
