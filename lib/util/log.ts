@@ -9,14 +9,18 @@ export function setVerbose(v: boolean) {
   verbose = v;
 }
 
+function logString(s: string) {
+  return `[${pad(6, elapsedTime(), ' ')}] ${s}`;
+}
+
 export function debug(s: string) {
   if (verbose) {
-    process.stderr.write(chalk.gray(`[${pad(6, elapsedTime(), ' ')}] ${s}`) + '\n');
+    process.stderr.write(chalk.gray(logString(s)) + '\n');
   }
 }
 
 export function info(s: string) {
-  process.stderr.write(chalk.blue(s) + '\n');
+  process.stderr.write(chalk.blue(logString(s)) + '\n');
 }
 
 export function warning(s: string) {
