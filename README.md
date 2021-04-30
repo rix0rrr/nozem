@@ -9,30 +9,18 @@ If you don't know whether you need this, you don't.
 Usage:
 
 ```
-$ yarn install --frozen-lockfile
-$ npx nozem from-lerna
-$ npx nozem build
+$ npm install -g nozem
+
+# Inside the CDK repo
+$ nzm
 ```
-
-To use S3 caching, put the following file in a directory above your repository:
-
-```
-nozem-cache.json
-
-{
-    "cacheBucket": {
-        "bucketName": "...",
-        "region": "...",
-        "profileName": "..."
-    }
-}
-```
-
-Get me to make you a user to a shared cache.
-
 
 ## Troubleshooting
 
 # Docker fails with: unable to create context store: $HOME is not defined
 
-Docker > Preferences > Command Line > Uncheck **Enable Cloud Experience**.
+Docker > Preferences > Command Line (or Experimental Features) > Uncheck **Enable Cloud Experience**.
+
+# Docker fails with: exec: "com.docker.cli": executable file not found in $PATH
+
+Docker > Preferences > Command Line (or Experimental Features) > Uncheck **Enable Cloud Experience**.
