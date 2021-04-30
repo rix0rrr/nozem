@@ -19,8 +19,8 @@ $ nzm
 
 # Docker fails with: unable to create context store: $HOME is not defined
 
-Docker > Preferences > Command Line > Uncheck **Enable Cloud Experience**.
+Docker > Preferences > Command Line (or Experimental Features) > Uncheck **Enable Cloud Experience**.
 
 # Docker fails with: exec: "com.docker.cli": executable file not found in $PATH
 
-Docker > Preferences > Command Line > Uncheck **Enable Cloud Experience**.
+Docker > Preferences > Command Line (or Experimental Features) > Uncheck **Enable Cloud Experience**.
