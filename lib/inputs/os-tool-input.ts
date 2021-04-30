@@ -37,15 +37,17 @@ export class OsToolInput implements IBuildInput {
   public async install(dir: BuildDirectory): Promise<void> {
     await dir.installExecutable(this.location, this.name);
 
-    // Make an exception for Docker. On macOS it seems 'com.docker.cli' is also necessary
-    // for some versions of Docker to work properly. Not exactly clear how or why, but
+    // Make an exception for Docker Desktop. It seems 'com.docker.cli' and other tools are also necessary
+    // for some versions of Docker to work properly. This used to be disablable by turning off "Cloud Experience"
+    // in Docker Desktop 2, but they removed it in 3.
     // let's just go with it.
     if (this.name === 'docker') {
-      try {
-        const alsoInstall = 'com.docker.cli';
-        await dir.installExecutable(await OsToolInput.findExecutable(alsoInstall), alsoInstall);
-      } catch (e) {
-        log.debug(`${e}`);
+      for (const alsoInstall of ['com.docker.cli', 'docker-credential-desktop', 'docker-credential-osxkeychain']) {
+        try {
+          await dir.installExecutable(await OsToolInput.findExecutable(alsoInstall), alsoInstall);
+        } catch (e) {
+          log.debug(`${e}`);
+        }
       }
     }
   }
