@@ -145,7 +145,7 @@ export class S3Cache implements IArtifactCache {
       const profileName = `${this.bucketName}-profile`;
       const profiles = await parseKnownFiles({});
       const haveProfile = !!profiles[profileName];
-      const haveEnv = process.env.AWS_ACCESS_KEY_ID;
+      const haveEnv = process.env.AWS_ACCESS_KEY_ID || process.env.CODEBUILD_CI;
 
       if (haveProfile) {
         log.debug(`Using S3 cache '${this.bucketName}' with profile '${profileName}'`);
