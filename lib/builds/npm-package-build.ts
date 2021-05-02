@@ -300,15 +300,15 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       // FIXME: We could be parsing .npmignore here (mucho correct) but right now
       // it's simpler to say everything in the source dir is the output of this package build
       // (will hash+copy more files than necessary, but oh well)
-      const buildResult = await FileSet.fromDirectoryWithIgnores(buildDir.srcDir, [
+      const buildIgnores = [
         // This thing is created by TypeScript and will contain timestamps and other
         // nondeterministic stuff.
         '*.tsbuildinfo',
 
-        // We will have patched this file, and we should definitely not overwrite
-        // those changes back to the source dir.
-        'tsconfig.json',
-      ]);
+        // Definitely don't include node_modules in the artifacts
+        'node_modules',
+      ];
+      const buildResult = await FileSet.fromDirectoryWithIgnores(buildDir.srcDir, buildIgnores);
 
       if (this.workspace.options.test) {
         const testT = TEST_TIMER.start();
@@ -327,7 +327,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       // Copy back new files to source directory (this DOES include test results)
       // FIXME: delete files in source directory that are "over" ?
 
-      const allOutputFiles = await FileSet.fromDirectory(buildDir.srcDir);
+      const allOutputFiles = await FileSet.fromDirectoryWithIgnores(buildDir.srcDir, buildIgnores);
       await allOutputFiles.except(this.sources).copyTo(this.directory);
 
       // Return only the files built during the 'build' step as artifacts
@@ -347,20 +347,15 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       await other.install(dir);
     }
 
-    // Hoist dependencies for 2 reasons:
-    // 1) Optimization
-    // 2) Yarn is a rat's nest of a cyclic dependencies (https://github.com/facebook/jest/issues/9712)
-    //    and otherwise we'll never be able to properly install these.
-
     // Bundled dependencies are installed into the src directory (otherwise `npm pack`
     // would not bundle them), regular dependencies are not.
-    // Bundled dependencies still need to be hoisted, otherwise `npm-bundled` will not
-    // properly detect them.
+    //
+    // Bundled dependencies still need to be hoisted, otherwise `npm-bundled` (which
+    // CDK uses in 'pkglint') will not properly detect them, so we always COPY them.
     const bundledDependencies = this.packageJson.bundledDependencies ?? [];
     const [bundled, other] = partition(npms, npm => bundledDependencies.includes(npm.name));
-
-    // Bundled dependencies must always be copied
     await NpmCopyInstall.installAll(dir, bundled, dir.relativePath(dir.srcDir));
+
     await NpmCopyInstall.installAll(dir, other, '.');
   }
 

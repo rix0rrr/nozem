@@ -10,6 +10,10 @@ export type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
  *
  * Hoist to reduce useless copies in the dependency tree.
  *
+ * Also because Jest is a rat's nest of a cyclic dependencies
+ * (https://github.com/facebook/jest/issues/9712) and otherwise we'll never be
+  * able to properly install these.
+ *
  * Produces a dependency tree equivalent to what Yarn/NPM would produce, but gets
  * expensive for a big list of dependencies.
  */
