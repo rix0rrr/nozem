@@ -12,8 +12,9 @@ import { findNpmPackage, npmBuildDependencies, readPackageJson } from "../util/n
 import { cachedPromise, mkdict, partition, partitionT } from "../util/runtime";
 import { BuildDirectory, shellExecute, Workspace } from '../build-tools';
 import { CumulativeTimer } from '../util/timer';
-import { constantHashable, IHashable, MerkleComparison, MerkleDifference, MerkleTree, renderComparison, SerializedMerkleTree } from '../util/merkle';
+import { constantHashable, hashOf, IHashable, MerkleComparison, MerkleDifference, MerkleTree, renderComparison, SerializedMerkleTree } from '../util/merkle';
 import { ICachedArtifacts } from '../caches/icache';
+import { NpmCopyInstall } from '../npm-installs/copy-install';
 
 const artifactsCacheSymbol = Symbol();
 const inputHashCacheSymbol = Symbol();
@@ -70,12 +71,12 @@ export abstract class NpmPackageBuild {
 
     const deps = new MerkleTree(npmDependencyInputs);
 
-    const osTools = new MerkleTree(await Promise.all(
+    let osTools = new MerkleTree(await Promise.all(
       (pj.nozem?.ostools ?? []).map(async (name) =>
       [name, await OsToolInput.fromExecutable(name)] as const
     )));
     // NPM packages always need node
-    osTools.add('node', await OsToolInput.fromExecutable('node'));
+    osTools = osTools.add({ node: await OsToolInput.fromExecutable('node') });
 
     // External files
     const externalFiles = new MerkleTree([
@@ -189,6 +190,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
   private static logicVersion = 1;
 
   private readonly packageName: string;
+  private readonly merkle: MerkleTree<IHashable>;
 
   constructor(
     private readonly workspace: Workspace,
@@ -197,19 +199,19 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     private readonly sources: FileSet,
     private readonly inputs: IBuildInput[],
     private readonly env: Record<string, string>,
-    private readonly merkle: MerkleTree<IHashable>,
+    inputTree: MerkleTree<IHashable>,
     ) {
     super();
 
     this.packageName = this.packageJson.name;
 
-    this.merkle.add('v', constantHashable(`${NozemNpmPackageBuild.logicVersion}`));
+    this.merkle = inputTree.add({ v: constantHashable(`${NozemNpmPackageBuild.logicVersion}`) });
   }
 
   public async inputHash(): Promise<string> {
     return cachedPromise(this, inputHashCacheSymbol, async () => {
       log.debug(`Calculating inputHash for ${this.packageJson.name}`);
-      return this.merkle.hash();
+      return hashOf(this.merkle);
     });
   }
 
@@ -220,7 +222,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     const cached = await this.cacheLookup();
     if (cached) { return cached.artifactHash; }
 
-    return (await this.build()).hash();
+    return hashOf(await this.build());
   }
 
   public async build(): Promise<FileSet> {
@@ -252,9 +254,9 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       // Do a validation -- we should remove this once we feel confident that shit works, or
       // once we've better scoped the FS caching.
       TEST_clearFileHashCache();
-      const artifactHash = await artifacts.hash();
-      if (artifactHash !== await artifacts.hash()) {
-        log.error(`[BUG] The artifact hash was not consistent! (${artifactHash} vs ${await artifacts.hash()})`);
+      const artifactHash = await hashOf(artifacts);
+      if (artifactHash !== await hashOf(artifacts)) {
+        log.error(`[BUG] The artifact hash was not consistent! (${artifactHash} vs ${await hashOf(artifacts)})`);
       }
 
       return artifacts;
@@ -357,8 +359,9 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     const bundledDependencies = this.packageJson.bundledDependencies ?? [];
     const [bundled, other] = partition(npms, npm => bundledDependencies.includes(npm.name));
 
-    await NpmDependencyInput.installAll(dir, bundled, dir.relativePath(dir.srcDir));
-    await NpmDependencyInput.installAll(dir, other, '.');
+    // Bundled dependencies must always be copied
+    await NpmCopyInstall.installAll(dir, bundled, dir.relativePath(dir.srcDir));
+    await NpmCopyInstall.installAll(dir, other, '.');
   }
 
   private async ensureDependenciesBuilt(): Promise<void> {
@@ -374,7 +377,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
         log.debug(`Unchanged ${this.packageJson.name}`);
         return {
           source: 'inplace',
-          artifactHash: await inplaceCache.files.hash(),
+          artifactHash: await hashOf(inplaceCache.files),
           // Files are by definition already in the right place, so fetch doesn't
           // move or copy.
           fetch: (targetDir) => Promise.resolve(inplaceCache.files),
@@ -413,13 +416,13 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
 
       const prevInputTree = await MerkleTree.deserialize(cache.inputTree);
 
-      if (await prevInputTree.hash() === inputHash) {
+      if (await hashOf(prevInputTree) === inputHash) {
         // Account for the fact that some files may have disappeared
         const cachedArtifacts = await FileSet.fromSchema(this.directory, cache.artifacts).onlyExisting();
 
         // Do a validation -- we don't control the files on disk since the cache stamp,
         // who knows what happened to 'em?
-        const currentHash = await cachedArtifacts.hash();
+        const currentHash = await hashOf(cachedArtifacts);
         if (currentHash !== cache.artifactHash) {
           log.warning(`${this.directory}: artifact files changed since last build (${currentHash} vs ${cache.artifactHash})`);
           if (cache.artifactTree) {
@@ -446,7 +449,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     await writeJson<BuildCacheSchema>(this.inPlaceCacheFile, {
       inputTree: await MerkleTree.serialize(this.merkle, CHANGE_DETAIL_LEVELS),
       artifacts: artifacts.toSchema(),
-      artifactHash: await artifacts.hash(),
+      artifactHash: await hashOf(artifacts),
       artifactTree: await MerkleTree.serialize(artifacts),
     });
   }

@@ -7,6 +7,7 @@ import * as tar from 'tar';
 import { promises as fs } from 'fs';
 import { PROMISE_POOL } from '../util/concurrency';
 import { OneAtATime } from '../util/one-at-a-time';
+import { hashOf } from '../util/merkle';
 
 export interface DirectoryCacheOptions {
   readonly maxSizeMB?: number;
@@ -39,7 +40,7 @@ export class DirectoryCache implements IArtifactCache {
 
       await ensureDirForFile(this.indexFilePath(pv));
       await writeJson<IndexFileSchema>(this.indexFilePath(pv), {
-        artifactHash: await files.hash(),
+        artifactHash: await hashOf(files),
         artifacts: files.toSchema(),
       });
 

@@ -12,6 +12,7 @@ import { readStream, s3BodyToStream } from '../util/streams';
 import { ensureDirForFile, exists, FileSet, FileSetSchema, readJsonIfExists } from '../util/files';
 import { CacheLocator, IArtifactCache, ICachedArtifacts } from './icache';
 import { Credentials } from 'aws-sdk';
+import { hashOf } from '../util/merkle';
 
 export class S3Cache implements IArtifactCache {
   private _s3?: S3;
@@ -105,7 +106,7 @@ export class S3Cache implements IArtifactCache {
           Bucket: this.bucketName,
           Key: this.remoteIndexKey(pv),
           Body: JSON.stringify({
-            artifactHash: await files.hash(),
+            artifactHash: await hashOf(files),
             artifacts: files.toSchema(),
           } as S3IndexFileSchema),
         });

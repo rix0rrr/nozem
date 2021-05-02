@@ -2,9 +2,9 @@ import { promises as fs, Stats } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as log from './log';
-import { cachedPromise, errorWithCode, escapeRegExp, mkdict } from './runtime';
-import { allGitIgnores, FilePattern, loadPatternFile } from './ignorefiles';
-import { IHashable, IMerkleTree, MerkleTree } from './merkle';
+import { errorWithCode, escapeRegExp, mkdict } from './runtime';
+import { FilePattern, loadPatternFile } from './ignorefiles';
+import { IDirectlyHashable, IHashable, IHashableElements, MerkleTree } from './merkle';
 import { PROMISE_POOL } from './concurrency';
 
 const hashSym = Symbol();
@@ -16,7 +16,7 @@ export interface FileSetSchema {
 /**
  * A set of files, relative to a directory
  */
-export class FileSet implements IMerkleTree {
+export class FileSet implements IHashableElements {
   public static fromSchema(dir: string, schema: FileSetSchema) {
     return new FileSet(dir, schema.relativePaths);
   }
@@ -42,11 +42,11 @@ export class FileSet implements IMerkleTree {
     return FileSet.fromMatcher(directory, ignorePattern.toComplementaryMatcher());
   }
 
-  public readonly elements: Record<string, File>;
+  public readonly hashableElements: Record<string, File>;
 
   constructor(public readonly root: string, public readonly fileNames: string[]) {
     this.fileNames.sort();
-    this.elements = mkdict(fileNames.map(fn => [fn, new File(path.join(root, fn))] as const));
+    this.hashableElements = mkdict(fileNames.map(fn => [fn, new File(path.join(root, fn))] as const));
   }
 
   public get fullPaths() {
@@ -72,6 +72,14 @@ export class FileSet implements IMerkleTree {
     return this.rebase(targetDir);
   }
 
+  public async hardLinkTo(targetDir: string): Promise<FileSet> {
+    await PROMISE_POOL.all(this.fileNames.map((f) => () => hardLink(
+        path.join(this.root, f),
+        path.join(targetDir, f))));
+
+    return this.rebase(targetDir);
+  }
+
   public rebase(newDirectory: string) {
     return new FileSet(newDirectory, this.fileNames);
   }
@@ -79,10 +87,6 @@ export class FileSet implements IMerkleTree {
   public except(rhs: FileSet) {
     const ignorePaths = new Set(rhs.fileNames);
     return new FileSet(this.root, this.fileNames.filter(f => !ignorePaths.has(f)));
-  }
-
-  public hash(): Promise<string> {
-    return MerkleTree.hashTree(this);
   }
 
   public filter(pred: (x: string) => boolean): FileSet {
@@ -105,7 +109,7 @@ export class FileSet implements IMerkleTree {
   }
 }
 
-export class File implements IHashable {
+export class File implements IDirectlyHashable {
   constructor(public readonly absPath: string) {
   }
 
@@ -139,7 +143,7 @@ export async function fileHash(fullPath: string) {
   return ret;
 }
 
-export class HashableFile implements IHashable {
+export class HashableFile implements IDirectlyHashable {
   constructor(public readonly fileName: string) {
   }
 
@@ -348,6 +352,28 @@ export async function copy(src: string, target: string) {
   }
 }
 
+export async function hardLink(src: string, target: string) {
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const targetExists = await exists(target);
+  let errorMessage = `Error hardlinking ${src} -> ${target}`;
+  try {
+    const stat = await fs.lstat(src);
+    if (stat.isSymbolicLink()) {
+      const linkTarget = await fs.readlink(src);
+      errorMessage = `Error copying symlink ${src} (${linkTarget}) -> ${target}`;
+      if (targetExists) {
+        await fs.unlink(target);
+      }
+      await fs.symlink(linkTarget, target);
+    } else {
+      await fs.link(src, target);
+    }
+  } catch (e) {
+    log.error(errorMessage);
+    throw e;
+  }
+}
+
 export function standardHash() {
   return crypto.createHash('sha1');
 }
@@ -383,7 +409,10 @@ export async function ensureDirForFile(filePath: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
 }
 
-export async function ensureSymlink(target: string, filePath: string, overwrite?: boolean) {
+/**
+ * Symlink target into filePath
+ */
+export async function ensureSymlink(target: string, filePath: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   try {
     await fs.symlink(target, filePath);

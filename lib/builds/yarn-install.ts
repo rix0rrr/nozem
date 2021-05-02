@@ -4,7 +4,7 @@ import { CacheFile } from '../util/cache-file';
 import { fileHash, HashableFile, readJsonIfExists, writeJson } from '../util/files';
 import { shellExecute } from '../build-tools';
 import { MonoRepoPackage } from '../util/monorepo';
-import { constantHashable, IHashable, MerkleTree, standardHash } from '../util/merkle';
+import { constantHashable, hashOf, IHashable, MerkleTree, standardHash } from '../util/merkle';
 
 /**
  * A fake build-like thing
@@ -26,7 +26,7 @@ export class YarnInstall {
       'yarn.lock': new HashableFile(lockFilename),
       'monoRepoLayout': this.monoRepoDependencyTree(),
     });
-    const lockHash = await lockTree.hash();
+    const lockHash = await hashOf(lockTree);
 
     const cacheFile = new CacheFile<InstallCacheSchema>(path.join(this.root, CACHE_FILE));
     const cache = await cacheFile.read();
@@ -42,16 +42,15 @@ export class YarnInstall {
   }
 
   private monoRepoDependencyTree(): MerkleTree<IHashable> {
-    const ret = new MerkleTree<IHashable>();
-
-    for (const p of this.monoRepoPackages) {
-      ret.add(p.packageJson.name, MerkleTree.fromDict({
-        ...p.packageJson.dependencies,
-        ...p.packageJson.devDependencies,
-      }));
-    }
-
-    return ret;
+    return new MerkleTree<IHashable>(this.monoRepoPackages.map(p =>
+      [
+        p.packageJson.name,
+        MerkleTree.fromDict({
+          ...p.packageJson.dependencies,
+          ...p.packageJson.devDependencies,
+        })
+      ] as const
+    ));
   }
 }
 

@@ -1,3 +1,4 @@
+import * as os from 'os';
 import * as path from 'path';
 import { PackageJson } from '../file-schemas';
 import { exists } from '../util/files';
@@ -8,6 +9,7 @@ import { DirectoryCache } from '../caches/directory-cache';
 import { CacheChain } from '../caches/cache-chain';
 import { S3Cache } from '../caches/s3cache';
 import { NullCache } from '../caches/null-cache';
+import { NodeFarmCache } from '../caches/node-farm-cache';
 
 export interface WorkspaceOptions {
   readonly test: boolean;
@@ -23,6 +25,7 @@ export class Workspace {
   }
 
   public readonly artifactCache: IArtifactCache;
+  public readonly nodeFarmCache: NodeFarmCache;
   private packageBuildCache = new Map<string, NpmPackageBuild>();
 
   constructor(
@@ -30,6 +33,7 @@ export class Workspace {
     private readonly packageJson: PackageJson | undefined,
     public readonly options: WorkspaceOptions) {
 
+    this.nodeFarmCache = new NodeFarmCache(path.join(os.tmpdir(), 'nozem-nodefarm'));
 
     if (options.cache) {
       const localCache = DirectoryCache.default({

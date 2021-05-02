@@ -63,13 +63,12 @@ export class BuildDirectory {
     }
   }
 
-  public async installExecutable(absTarget: string, binName?: string, overwrite?: boolean) {
+  public async installExecutable(absTarget: string, binName?: string) {
     const targetPath = path.join(this.binDir, binName ?? path.basename(absTarget));
     try {
       await ensureSymlink(
         absTarget,
-        targetPath,
-        overwrite);
+        targetPath);
     } catch (e) {
       throw new Error(`Error symlinking ${absTarget} -> ${targetPath}: ${e.message}`);
     }

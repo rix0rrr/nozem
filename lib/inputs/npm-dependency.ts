@@ -1,24 +1,23 @@
+/* eslint-disable @typescript-eslint/member-ordering */
 import * as path from 'path';
 import { BuildDirectory } from '../build-tools/build-directory';
 import { NonHermeticNpmPackageBuild, NozemNpmPackageBuild, NpmPackageBuild } from '../builds/npm-package-build';
 import { Workspace } from '../build-tools/workspace';
 import { PackageJson } from '../file-schemas';
-import { FileSet, standardHash } from '../util/files';
-import { DependencyNode, DependencySet, hoistDependencies, renderTree } from '../util/hoisting';
+import { ensureSymlink, FileSet } from '../util/files';
 import { debug } from '../util/log';
 import { findNpmPackage, npmRuntimeDependencies, readPackageJson } from '../util/npm';
-import { cachedPromise } from '../util/runtime';
+import { cachedPromise, mkdict } from '../util/runtime';
 import { IBuildInput } from './build-input';
-import { constantHashable, IHashable, IMerkleTree, MerkleTree } from '../util/merkle';
+import { constantHashable, hashOf, IHashable, IHashableElements, MerkleTree } from '../util/merkle';
+import { NpmDependencyNode, NpmDependencyTree, PromisedDependencies } from '../npm-installs/copy-install';
 
 const objectCache: any = {};
 const hashSym = Symbol();
 const sourcesSym = Symbol();
 
 
-type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
-
-export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
+export abstract class NpmDependencyInput implements IBuildInput, IHashableElements {
   public static fromDirectory(workspace: Workspace, packageDirectory: string, alreadyIncluded?: string[]): Promise<NpmDependencyInput> {
     return cachedPromise(objectCache, packageDirectory, async () => {
       const packageJson = await readPackageJson(packageDirectory);
@@ -45,33 +44,8 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
         }
         throw new Error(`Unrecognized type of NPM package build: ${monoRepoBuild}`);
       }
-      return new NpmRepoDependencyInput(packageDirectory, packageJson, trans);
+      return new NpmRegistryDependencyInput(packageDirectory, packageJson, trans);
     });
-  }
-
-  /**
-   * Install hoisted
-   */
-  public static async installAll(dir: BuildDirectory, npmDependencies: NpmDependencyInput[], subdir: string = '.') {
-    // Turn list into map
-    const deps: PromisedDependencies = {};
-    for (const dep of npmDependencies) {
-      deps[dep.name] = Promise.resolve(dep);
-    }
-    // Build tree from map and hoist
-    const packageTree = await buildNaiveTree(deps);
-    hoistDependencies(packageTree);
-
-    // Install
-    await this.installDependencyTree(dir, subdir, packageTree.dependencies ?? {});
-  }
-
-  private static async installDependencyTree(dir: BuildDirectory, subdir: string, tree: NpmDependencyTree) {
-    await Promise.all(Object.entries(tree).map(async ([key, dep]) => {
-      const depDir = path.join(subdir, 'node_modules', key);
-      await dep.npmDependency.installInto(dir, depDir);
-      await this.installDependencyTree(dir, depDir, dep.dependencies ?? {});
-    }));
   }
 
   public abstract readonly isHashable: boolean;
@@ -85,7 +59,7 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
     public readonly transitiveDeps: PromisedDependencies) {
   }
 
-  public get elements(): Promise<Record<string, IHashable>> {
+  public get hashableElements(): Promise<Record<string, IHashable>> {
     return new Promise(async (ok, ko) => {
       try {
         const ret: Record<string, IHashable> = {};
@@ -112,34 +86,27 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
     return { name: this.name, version: this.version };
   }
 
-  public async hash(): Promise<string> {
-    return cachedPromise(this, hashSym, async () => {
-      return MerkleTree.hashTree(this);
-    });
-  }
-
   public async install(dir: BuildDirectory): Promise<void> {
-    return this.installInto(dir, path.join('node_modules', this.name));
+    throw new Error('NPM dependencies are expected to be installed via installAll');
   }
 
-  private async installInto(dir: BuildDirectory, subdir: string): Promise<void> {
-    // Remove .ts files that have a corresponding .d.ts file from the artifact set.
-    // (If we include the .ts file then downstream TypeScript compiler will prefer
-    // the .ts files but they will reference types from devDependencies which may not
-    // be available).
-    //
-    // Note that we DID copy those files back, we're just not counting them as part
-    // of the artifacts of this build.
-    const files = stripTypescriptSources(await this.files());
-    await dir.addFiles(files, subdir);
+  public async installInto(dir: BuildDirectory, packageDir: string): Promise<void> {
+    const files = await this.files();
+    await dir.addFiles(files, path.join(packageDir, 'node_modules', this.name));
+    await this.installBinLinks(dir, files.root);
+  }
 
+  /**
+   * Install symlinks to bin scripts in the BuildDirectory, assuming the package has been installed into `installDir`
+   */
+  public async installBinLinks(dir: BuildDirectory, installDir: string) {
     if (typeof this.packageJson.bin === 'string') {
-      const fullBinPath = path.resolve(dir.directory, subdir, this.packageJson.bin);
-      await dir.installExecutable(fullBinPath, this.name, true);
+      const fullBinPath = path.resolve(dir.directory, installDir, this.packageJson.bin);
+      await dir.installExecutable(fullBinPath, this.name);
     }
     if (typeof this.packageJson.bin === 'object') {
       for (const [binName, binLoc] of Object.entries(this.packageJson.bin ?? {})) {
-        const fullBinPath = path.resolve(dir.directory, subdir, binLoc);
+        const fullBinPath = path.resolve(dir.directory, installDir, binLoc);
         await dir.installExecutable(fullBinPath, binName);
       }
     }
@@ -147,7 +114,7 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
 
   public abstract build(): Promise<void>;
 
-  protected abstract files(): Promise<FileSet>;
+  public abstract files(): Promise<FileSet>;
 
   /**
    * Unique identifier for the set of files backing this NPM dependency
@@ -159,7 +126,10 @@ export abstract class NpmDependencyInput implements IBuildInput, IMerkleTree {
   protected abstract filesIdentifier(): Promise<string>;
 }
 
-class NpmRepoDependencyInput extends NpmDependencyInput {
+/**
+ * An NPM dependency downloaded from npmjs
+ */
+class NpmRegistryDependencyInput extends NpmDependencyInput {
   public readonly isHashable = true;
 
   public async build() {
@@ -191,12 +161,12 @@ class MonoRepoInPlaceBuildDependencyInput extends NpmDependencyInput {
     await this.packageBuild.build();
   }
 
-  protected files(): Promise<FileSet> {
-    throw new Error(`Cannot get files of this directory -- it is not nozem-compatible`);
+  public files(): Promise<FileSet> {
+    throw new Error(`${this.name} cannot be a Nozem dependency -- it is not a nozem-compatible package`);
   }
 
   protected filesIdentifier(): Promise<string> {
-    throw new Error(`Cannot get hash of this directory -- it is not nozem-compatible`);
+    throw new Error(`${this.name} cannot be a Nozem dependency -- it is not a nozem-compatible package`);
   }
 }
 
@@ -204,6 +174,9 @@ export function isMonoRepoBuildDependencyInput(x: IBuildInput): x is MonoRepoBui
   return x instanceof MonoRepoBuildDependencyInput;
 }
 
+/**
+ * An hermetically built NPM dependency
+ */
 export class MonoRepoBuildDependencyInput extends NpmDependencyInput {
   public readonly isHashable = true;
 
@@ -220,7 +193,11 @@ export class MonoRepoBuildDependencyInput extends NpmDependencyInput {
   }
 
   public async files() {
-    return this.packageBuild.build();
+    // Remove .ts files that have a corresponding .d.ts file from the artifact set.
+    // (If we include the .ts file then downstream TypeScript compiler will prefer
+    // the .ts files but they will reference types from devDependencies which may not
+    // be available).
+    return stripTypescriptSources(await this.packageBuild.build());
   }
 
   public async filesIdentifier() {
@@ -232,50 +209,6 @@ function isMonoRepoPackage(packageDirectory: string) {
   // FIXME: This could be implemented better but as of now this is cheap
   return !packageDirectory.includes('node_modules');
 }
-
-/**
- * Build a naive package tree using a recursion breaker.
- *
- * A -> B -> A -> B -> ...
- *
- * Will be returned as:
- *
- *  A
- *   +- B
- */
-async function buildNaiveTree(baseDeps: PromisedDependencies): Promise<NpmDependencyNode> {
-  return {
-    version: '*',
-    npmDependency: undefined as any, // <-- OH NO. This is never looked at anyway, don't know how to make this better.
-    dependencies: await recurse(baseDeps, []),
-  };
-
-  async function recurse(deps: PromisedDependencies, cycle: string[]) {
-    const ret: NpmDependencyTree = {};
-
-    for (const [dep, promise] of Object.entries(deps)) {
-      if (!cycle.includes(dep)) {
-        const npm = await promise;
-
-        ret[dep] = {
-          version: npm.version,
-          npmDependency: npm,
-          dependencies: await recurse(npm.transitiveDeps, [...cycle, dep]),
-        };
-      }
-    }
-
-    return ret;
-  }
-}
-
-interface NpmNodeInfo {
-  npmDependency: NpmDependencyInput;
-}
-
-type NpmDependencyNode = DependencyNode<NpmNodeInfo>;
-
-export type NpmDependencyTree = DependencySet<NpmNodeInfo>;
 
 /**
  * Strip files that will mess up downstream TypeScript compilation

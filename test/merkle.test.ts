@@ -1,4 +1,4 @@
-import { constantHashable, IMerkleTree, MerkleTree } from '../lib/util/merkle';
+import { constantHashable, hashOf, IHashableElements, MerkleTree } from '../lib/util/merkle';
 
 test('tree serialization and deserialization', async () => {
   const original = new MerkleTree({
@@ -11,13 +11,12 @@ test('tree serialization and deserialization', async () => {
 
   const reconstructed = await MerkleTree.deserialize(await MerkleTree.serialize(original));
 
-  expect(await reconstructed.hash()).toEqual(await reconstructed.hash());
+  expect(await hashOf(reconstructed)).toEqual(await hashOf(reconstructed));
 });
 
 test('tree serialization of promised elements', async () => {
-  const foo: IMerkleTree = {
-    hash: () => MerkleTree.hashTree(foo),
-    elements: Promise.resolve({
+  const foo: IHashableElements = {
+    hashableElements: Promise.resolve({
       subelement: constantHashable('xyz'),
     }),
   };
@@ -35,5 +34,5 @@ test('tree serialization of promised elements', async () => {
   }));
 
   const reconstructed = await MerkleTree.deserialize(serialized);
-  expect(await reconstructed.hash()).toEqual(await reconstructed.hash());
+  expect(await hashOf(reconstructed)).toEqual(await hashOf(reconstructed));
 });
