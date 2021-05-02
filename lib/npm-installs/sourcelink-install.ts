@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { BuildDirectory } from "../build-tools";
 import { NpmDependencyInput, NpmRegistryDependencyInput } from "../inputs/npm-dependency";
+import { hoistedDependencyTree, NpmDependencyNode, NpmDependencyTree } from './copy-install';
 import { DependencyNode, DependencySet, hoistDependencies } from './hoisting';
 
 export type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
@@ -25,7 +26,23 @@ export class NpmSourceLinkInstall {
   }
 
   public async installAll(dir: BuildDirectory, subdir: string = '.') {
-    const packageTree = await hoistedDependencyTree(this.npmDependencies);
+    // In an attempt to have to create fewer symlinks: we only have to
+    // hoist through Monorepo dependencies -- registry dependencies can be
+    // fully symlinked as their dependencies will have been satisfied in-source-location
+    // by Yarn, but Monorepo dependencies require re-linked dependencies
+    // in the root.
+    //
+    // If we don't do this, we hoist everything to the top-level but that
+    // requires making more symlinks. Saves ~1/3rd of symlinking time but
+    // requires that all packages have accurate dependencies.
+    const limitHoisting = !!process.env.NZM_LIMIT_HOISTING;
+
+    const shouldHoistInside = limitHoisting
+      // Recurse only into non-registry dependencies (registry deps can be linked wholesale)
+      ? (n: NpmDependencyNode) => !(n.npmDependency instanceof NpmRegistryDependencyInput)
+      : undefined;
+
+    const packageTree = await hoistedDependencyTree(this.npmDependencies, shouldHoistInside);
 
     // Install
     await this.installDependencyTree(dir, subdir, packageTree.dependencies ?? {});
@@ -49,64 +66,4 @@ export class NpmSourceLinkInstall {
     await node.npmDependency.installInto(dir, subdir);
     return true;
   }
-}
-
-/**
- * Build a naive package tree using a recursion breaker.
- *
- * A -> B -> A -> B -> ...
- *
- * Will be returned as:
- *
- *  A
- *   +- B
- */
-export async function buildNaiveTree(baseDeps: PromisedDependencies): Promise<NpmDependencyNode> {
-  return {
-    version: '*',
-    npmDependency: undefined as any, // <-- OH NO. This is never looked at anyway, don't know how to make this better.
-    dependencies: await recurse(baseDeps, []),
-  };
-
-  async function recurse(deps: PromisedDependencies, cycle: string[]) {
-    const ret: NpmDependencyTree = {};
-
-    for (const [dep, promise] of Object.entries(deps)) {
-      if (!cycle.includes(dep)) {
-        const npm = await promise;
-
-        ret[dep] = {
-          version: npm.version,
-          npmDependency: npm,
-          dependencies: await recurse(npm.transitiveDeps, [...cycle, dep]),
-        };
-      }
-    }
-
-    return ret;
-  }
-}
-
-interface NpmNodeInfo {
-  npmDependency: NpmDependencyInput;
-}
-
-export type NpmDependencyNode = DependencyNode<NpmNodeInfo>;
-export type NpmDependencyTree = DependencySet<NpmNodeInfo>;
-
-
-export function makeDependencyTree(npmDependencies: NpmDependencyInput[]) {
-  // Turn list into map
-  const deps: PromisedDependencies = {};
-  for (const dep of npmDependencies) {
-    deps[dep.name] = Promise.resolve(dep);
-  }
-  // Build tree from map and hoist
-  return buildNaiveTree(deps);
-}
-
-export async function hoistedDependencyTree(npmDependencies: NpmDependencyInput[]) {
-  const packageTree = await makeDependencyTree(npmDependencies);
-  hoistDependencies(packageTree);
-  return packageTree;
 }

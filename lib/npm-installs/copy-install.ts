@@ -86,8 +86,8 @@ export type NpmDependencyNode = DependencyNode<NpmNodeInfo>;
 export type NpmDependencyTree = DependencySet<NpmNodeInfo>;
 
 
-export async function hoistedDependencyTree(npmDependencies: NpmDependencyInput[]) {
+export async function hoistedDependencyTree(npmDependencies: NpmDependencyInput[], conditionalHoisting?: (x: NpmDependencyNode) => boolean) {
   const packageTree = await naiveDependencyTree(npmDependencies);
-  hoistDependencies(packageTree);
+  hoistDependencies(packageTree, conditionalHoisting);
   return packageTree;
 }
