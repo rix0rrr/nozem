@@ -1,24 +1,26 @@
 import * as path from 'path';
 import { BuildDirectory } from "../build-tools";
-import { NpmDependencyInput } from "../inputs/npm-dependency";
-import { mkdict } from '../util/runtime';
+import { NpmDependencyInput, NpmRegistryDependencyInput } from "../inputs/npm-dependency";
 import { DependencyNode, DependencySet, hoistDependencies } from './hoisting';
 
 export type PromisedDependencies = Record<string, Promise<NpmDependencyInput>>;
 
 /**
- * Install NPM packages by copying files
+ * Install NPM packages by symlinking to source
  *
- * Hoist to reduce useless copies in the dependency tree.
+ * Similar to the copy install, but for registry dependencies
+ * create a symlink to the source location of the package instead of
+ * copying the files.
  *
- * Also because Jest is a rat's nest of a cyclic dependencies
- * (https://github.com/facebook/jest/issues/9712) and otherwise we'll never be
-  * able to properly install these.
+ * This relies on the observation that Yarn has already created the correct
+ * symlink farms WITH hoisting for us for all packages, and so we might as well
+ * reuse that. Since the packages can be treated as effectively immutable, it shouldn't
+ * change behavior.
  *
- * Produces a dependency tree equivalent to what Yarn/NPM would produce, but gets
- * expensive for a big list of dependencies.
+ * This only works for Repo packages, not for monorepo packages -- those
+ * still need to be copied.
  */
-export class NpmCopyInstall {
+export class NpmSourceLinkInstall {
   constructor(private readonly npmDependencies: NpmDependencyInput[]) {
   }
 
@@ -31,10 +33,21 @@ export class NpmCopyInstall {
 
   private async installDependencyTree(dir: BuildDirectory, subdir: string, tree: NpmDependencyTree) {
     await Promise.all(Object.entries(tree).map(async ([key, dep]) => {
-      await dep.npmDependency.installInto(dir, subdir);
+      const shouldRecurse = await this.installDependencyNode(dir, subdir, dep);
+      if (!shouldRecurse) { return; }
+
       const depDir = path.join(subdir, 'node_modules', key);
       await this.installDependencyTree(dir, depDir, dep.dependencies ?? {});
     }));
+  }
+
+  private async installDependencyNode(dir: BuildDirectory, subdir: string, node: NpmDependencyNode): Promise<boolean> {
+    if (node.npmDependency instanceof NpmRegistryDependencyInput) {
+      await node.npmDependency.symlinkToSource(dir, subdir);
+      return false;
+    }
+    await node.npmDependency.installInto(dir, subdir);
+    return true;
   }
 }
 
@@ -48,11 +61,7 @@ export class NpmCopyInstall {
  *  A
  *   +- B
  */
-export async function naiveDependencyTree(npmDependencies: NpmDependencyInput[]): Promise<NpmDependencyNode> {
-  // Turn list into map and recurse
-  const baseDeps: PromisedDependencies = mkdict(npmDependencies.map(dep =>
-    [dep.name, Promise.resolve(dep)] as const));
-
+export async function buildNaiveTree(baseDeps: PromisedDependencies): Promise<NpmDependencyNode> {
   return {
     version: '*',
     npmDependency: undefined as any, // <-- OH NO. This is never looked at anyway, don't know how to make this better.
@@ -86,8 +95,18 @@ export type NpmDependencyNode = DependencyNode<NpmNodeInfo>;
 export type NpmDependencyTree = DependencySet<NpmNodeInfo>;
 
 
+export function makeDependencyTree(npmDependencies: NpmDependencyInput[]) {
+  // Turn list into map
+  const deps: PromisedDependencies = {};
+  for (const dep of npmDependencies) {
+    deps[dep.name] = Promise.resolve(dep);
+  }
+  // Build tree from map and hoist
+  return buildNaiveTree(deps);
+}
+
 export async function hoistedDependencyTree(npmDependencies: NpmDependencyInput[]) {
-  const packageTree = await naiveDependencyTree(npmDependencies);
+  const packageTree = await makeDependencyTree(npmDependencies);
   hoistDependencies(packageTree);
   return packageTree;
 }

@@ -1,4 +1,4 @@
-import { DependencyNode, DependencySet, hoistDependencies, renderTree } from "../lib/util/hoisting";
+import { DependencyNode, DependencySet, hoistDependencies, renderTree } from '../lib/npm-installs/hoisting';
 
 type DependencyTree = DependencyNode<{}>;
 

@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import * as path from 'path';
+import * as util from 'util';
 import { PackageJson, TsconfigJson } from "../file-schemas";
 import { IBuildInput } from "../inputs/build-input";
 import { SourceInput } from "../inputs/input-source";
@@ -15,6 +16,7 @@ import { CumulativeTimer } from '../util/timer';
 import { constantHashable, hashOf, IHashable, MerkleComparison, MerkleDifference, MerkleTree, renderComparison, SerializedMerkleTree } from '../util/merkle';
 import { ICachedArtifacts } from '../caches/icache';
 import { NpmCopyInstall } from '../npm-installs/copy-install';
+import { NpmSourceLinkInstall } from '../npm-installs/sourcelink-install';
 
 const artifactsCacheSymbol = Symbol();
 const inputHashCacheSymbol = Symbol();
@@ -354,9 +356,10 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
     // CDK uses in 'pkglint') will not properly detect them, so we always COPY them.
     const bundledDependencies = this.packageJson.bundledDependencies ?? [];
     const [bundled, other] = partition(npms, npm => bundledDependencies.includes(npm.name));
-    await NpmCopyInstall.installAll(dir, bundled, dir.relativePath(dir.srcDir));
+    await new NpmCopyInstall(bundled).installAll(dir, dir.relativePath(dir.srcDir));
 
-    await NpmCopyInstall.installAll(dir, other, '.');
+    // Try an optimized install
+    await new NpmSourceLinkInstall(other).installAll(dir, '.');
   }
 
   private async ensureDependenciesBuilt(): Promise<void> {

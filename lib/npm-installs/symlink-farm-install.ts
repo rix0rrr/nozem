@@ -4,7 +4,7 @@ import { NpmDependencyInput } from '../inputs/npm-dependency';
 import { ensureSymlink } from "../util/files";
 import { constantHashable, hashOf, IHashable, MerkleTree } from '../util/merkle';
 import { mkdict } from '../util/runtime';
-import { buildNaiveTree, NpmDependencyNode, NpmDependencyTree, PromisedDependencies } from "./copy-install";
+import { naiveDependencyTree, NpmDependencyNode, NpmDependencyTree, PromisedDependencies } from "./copy-install";
 
 /**
  * Install NPM packages by building a symlink farm in a cache
@@ -22,14 +22,8 @@ import { buildNaiveTree, NpmDependencyNode, NpmDependencyTree, PromisedDependenc
  */
 export abstract class SymlinkFarmInstall {
   public static async installAll(ws: Workspace, dir: BuildDirectory, npmDependencies: NpmDependencyInput[], subdir: string = '.') {
-    // Turn list into map
-    const deps: PromisedDependencies = {};
-    for (const dep of npmDependencies) {
-      deps[dep.name] = Promise.resolve(dep);
-    }
-    // Build tree from map (no hoisting!)
-    const packageTree = await buildNaiveTree(deps);
-
+    // Non-hoisted tree
+    const packageTree = await naiveDependencyTree(npmDependencies);
     await this.installSymlinkedDependencyTree(ws, dir, subdir, packageTree.dependencies ?? {});
   }
 

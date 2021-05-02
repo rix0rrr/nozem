@@ -16,7 +16,7 @@ export function isDirectlyHashable(h: IHashable): h is IDirectlyHashable {
 }
 
 export function isMerkleTree(h: IHashable): h is IHashableElements {
-  return 'elements' in h;
+  return 'hashableElements' in h;
 }
 
 export function hashOf(x: IHashable) {
@@ -54,7 +54,19 @@ export class MerkleTree<A extends IHashable> implements IHashableElements {
     await recurse(a, b, []);
     return differences.length > 0 ? { result: 'different', differences } : { result: 'same' };
 
-    async function recurse(x: IHashable, y: IHashable, path: string[]) {
+    async function recurse(x: IHashable | undefined, y: IHashable | undefined, path: string[]) {
+      if (!x && y) {
+        differences.push({
+          type: 'add', path, newHash: await hashOf(y),
+        });
+      }
+      if (x && !y) {
+        differences.push({
+          type: 'remove', path, oldHash: await hashOf(x),
+        });
+      }
+      if (!x || !y) { return; }
+
       if (isDirectlyHashable(x) && isDirectlyHashable(y)) {
         const oldHash = await MerkleTree.hashTree(x);
         const newHash = await MerkleTree.hashTree(y);
@@ -67,45 +79,8 @@ export class MerkleTree<A extends IHashable> implements IHashableElements {
       const xs = isMerkleTree(x) ? await x.hashableElements : {};
       const ys = isMerkleTree(y) ? await y.hashableElements : {};
 
-      for (const key of Object.keys(xs)) {
-        const xc = xs[key];
-        const xHash = await MerkleTree.hashTree(xc);
-        if (!(key in ys)) {
-          differences.push({
-            type: 'remove',
-            path: [...path, key],
-            oldHash: xHash,
-          });
-          continue;
-        }
-
-        const yc = ys[key];
-        const yHash = await MerkleTree.hashTree(yc);
-
-        if (xHash !== yHash) {
-          if (isMerkleTree(xc) && isMerkleTree(yc)) {
-            // Mutate 'keys' in place for efficiency!
-            path.push(key);
-            await recurse(xc, yc, path);
-            path.pop();
-          } else {
-            differences.push({
-              type: 'change',
-              path: [...path, key],
-              oldHash: xHash,
-              newHash: yHash,
-            });
-          }
-        }
-      }
-      for (const key of Object.keys(ys)) {
-        if (!(key in xs)) {
-          differences.push({
-            type: 'add',
-            path: [...path, key],
-            newHash: await MerkleTree.hashTree(ys[key]),
-          });
-        }
+      for (const key of new Set([...Object.keys(xs), ...Object.keys(ys)])) {
+        await recurse(xs[key], ys[key], [...path, key]);
       }
     }
   }

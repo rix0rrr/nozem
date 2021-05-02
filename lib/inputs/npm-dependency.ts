@@ -129,7 +129,7 @@ export abstract class NpmDependencyInput implements IBuildInput, IHashableElemen
 /**
  * An NPM dependency downloaded from npmjs
  */
-class NpmRegistryDependencyInput extends NpmDependencyInput {
+export class NpmRegistryDependencyInput extends NpmDependencyInput {
   public readonly isHashable = true;
 
   public async build() {
@@ -140,8 +140,14 @@ class NpmRegistryDependencyInput extends NpmDependencyInput {
       return FileSet.fromDirectoryWithIgnores(this.packageDirectory, ['node_modules']);
     });
   }
+
   public filesIdentifier() {
     return Promise.resolve(this.packageJson.version);
+  }
+
+  public async symlinkToSource(dir: BuildDirectory, packageDir: string): Promise<void> {
+    await ensureSymlink(this.packageDirectory, path.join(dir.directory, packageDir, 'node_modules', this.name));
+    await this.installBinLinks(dir, this.packageDirectory);
   }
 }
 
