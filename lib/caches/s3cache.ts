@@ -30,6 +30,11 @@ export class S3Cache implements IArtifactCache {
 
   constructor(private readonly bucketName: string, private readonly region?: string) {
     this.indexDirectory = path.join(os.homedir(), '.cache', 'nozem', 's3index', bucketName);
+
+    if (process.env.NZM_SKIP_S3) {
+      this._enabled = false;
+    }
+
     this.startS3IndexScan();
   }
 
@@ -43,8 +48,13 @@ export class S3Cache implements IArtifactCache {
 
     // Not available locally, poke S3 to be sure
     if (await this.remoteContains(loc)) {
-      const remoteIndex: S3IndexFileSchema = JSON.parse(await this.fetchRemote(this.remoteIndexKey(loc)));
-      return new S3Artifact(await this.s3(), this.bucketName, this.remoteDataKey(loc), remoteIndex);
+      const fetched = await this.fetchRemote(this.remoteIndexKey(loc));
+      try {
+        const remoteIndex: S3IndexFileSchema = JSON.parse(fetched);
+        return new S3Artifact(await this.s3(), this.bucketName, this.remoteDataKey(loc), remoteIndex);
+      } catch (e) {
+        log.warning(`Error loading s3://${this.bucketName}/${this.remoteIndexKey(loc)}: ${e}: ${fetched}`);
+      }
     }
 
     return undefined;
@@ -75,7 +85,10 @@ export class S3Cache implements IArtifactCache {
       Key: key,
     });
 
-    return response.Body?.toString() ?? '';
+    if (!response.Body) { return ''; }
+
+    // All the other types aren't used in NodeJS so force-cast
+    return (await readStream(response.Body as any)).toString();
   }
 
   public queueForStoring(pv: CacheLocator, files: FileSet): void {

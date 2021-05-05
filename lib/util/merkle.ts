@@ -67,13 +67,14 @@ export class MerkleTree<A extends IHashable> implements IHashableElements {
       }
       if (!x || !y) { return; }
 
-      if (isDirectlyHashable(x) && isDirectlyHashable(y)) {
-        const oldHash = await MerkleTree.hashTree(x);
-        const newHash = await MerkleTree.hashTree(y);
-        if (oldHash !== newHash) {
-          differences.push({ type: 'change', path, oldHash, newHash });
-          return;
-        }
+      const oldHash = await hashOf(x);
+      const newHash = await hashOf(y);
+
+      if (oldHash === newHash) { return; }
+
+      if (isDirectlyHashable(x) && isDirectlyHashable(y) && oldHash !== newHash) {
+        differences.push({ type: 'change', path, oldHash, newHash });
+        return;
       }
 
       const xs = isMerkleTree(x) ? await x.hashableElements : {};

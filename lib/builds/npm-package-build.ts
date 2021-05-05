@@ -395,7 +395,7 @@ export class NozemNpmPackageBuild extends NpmPackageBuild {
       switch (inplaceCache.result) {
         case 'mismatch':
           log.info(`will build ${this.packageJson.name} ` +
-            chalk.grey(`(${renderComparison(inplaceCache.comparison, 1)})`));
+            chalk.grey(`(${renderComparison(inplaceCache.comparison, 2)})`));
           return undefined;
         default:
           log.info(`will build ${this.packageJson.name}`);
