@@ -1,4 +1,4 @@
-import { createWriteStream } from 'fs';
+import { promises as fs, createWriteStream } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as log from '../util/log';
@@ -226,19 +226,27 @@ export class S3Cache implements IArtifactCache {
   }
 
   private async downloadRemoteIndexFile(loc: CacheLocator): Promise<void> {
-    await ensureDirForFile(this.localIndexPath(loc));
+    const targetPath = this.localIndexPath(loc);
+    const tempPath = `${targetPath}.tmp`;
+    await ensureDirForFile(targetPath);
+    const localFile = createWriteStream(tempPath);
 
-    return new Promise(async (ok, ko) => {
-      const localFile = createWriteStream(this.localIndexPath(loc));
-      const response = await (await this.s3()).getObject({
-        Bucket: this.bucketName,
-        Key: this.remoteIndexKey(loc),
-      });
-      s3BodyToStream(response.Body!)
-        .pipe(localFile)
-        .on('finish', ok)
-        .on('error', ko);
+    await new Promise(async (ok, ko) => {
+      try {
+        const response = await (await this.s3()).getObject({
+          Bucket: this.bucketName,
+          Key: this.remoteIndexKey(loc),
+        });
+        s3BodyToStream(response.Body!)
+          .pipe(localFile)
+          .on('finish', ok)
+          .on('error', ko);
+      } catch (e) {
+        ko(e);
+      }
     });
+
+    await fs.rename(tempPath, targetPath);
   }
 }
 
