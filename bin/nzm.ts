@@ -32,7 +32,7 @@ async function main() {
     .option('test', {
       type: 'boolean',
       desc: 'Run tests as part of build',
-      default: true,
+      default: false,
     })
     .option('cache', {
       type: 'boolean',
