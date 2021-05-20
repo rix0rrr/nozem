@@ -4,8 +4,10 @@ import * as crypto from 'crypto';
 import * as log from './log';
 import { errorWithCode, escapeRegExp, mkdict } from './runtime';
 import { FilePattern, loadPatternFile } from './ignorefiles';
-import { IDirectlyHashable, IHashable, IHashableElements, MerkleTree } from './merkle';
-import { PROMISE_POOL } from './concurrency';
+import { IDirectlyHashable, IHashableElements } from './merkle';
+import { PromisePool } from './concurrency';
+
+export const FILE_PROMISE_POOL = new PromisePool(4);
 
 const hashSym = Symbol();
 
@@ -65,7 +67,7 @@ export class FileSet implements IHashableElements {
   }
 
   public async copyTo(targetDir: string): Promise<FileSet> {
-    await PROMISE_POOL.all(this.fileNames.map((f) => () => copy(
+    await FILE_PROMISE_POOL.all(this.fileNames.map((f) => () => copy(
         path.join(this.root, f),
         path.join(targetDir, f))));
 
@@ -73,7 +75,7 @@ export class FileSet implements IHashableElements {
   }
 
   public async hardLinkTo(targetDir: string): Promise<FileSet> {
-    await PROMISE_POOL.all(this.fileNames.map((f) => () => hardLink(
+    await FILE_PROMISE_POOL.all(this.fileNames.map((f) => () => hardLink(
         path.join(this.root, f),
         path.join(targetDir, f))));
 
@@ -103,7 +105,7 @@ export class FileSet implements IHashableElements {
    * Filter the list of files down to only files that actually exist
    */
   public async onlyExisting() {
-    const existing = await PROMISE_POOL.all(this.fileNames.map((f) => async () =>
+    const existing = await FILE_PROMISE_POOL.all(this.fileNames.map((f) => async () =>
       exists(path.join(this.root, f))));
     return new FileSet(this.root, this.fileNames.filter((_, i) => existing[i]));
   }
@@ -128,7 +130,7 @@ export async function fileHash(fullPath: string) {
   const existing = hashCache.get(fullPath);
   if (existing) { return existing; }
 
-  const ret = PROMISE_POOL.queue(async () => {
+  const ret = FILE_PROMISE_POOL.queue(async () => {
     const stats = await fs.lstat(fullPath);
     const hash = standardHash();
     if (stats.isSymbolicLink()) {
@@ -455,7 +457,7 @@ export async function ignoreEnoent(block: () => Promise<void>): Promise<void> {
 export async function removeOldSubDirectories(n: number, dirName: string) {
   return ignoreEnoent(async () => {
     const entries = await fs.readdir(dirName);
-    const es = await PROMISE_POOL.all(entries.map((e) => async () => {
+    const es = await FILE_PROMISE_POOL.all(entries.map((e) => async () => {
       const fullPath = path.join(dirName, e);
       return { fullPath, mtime: (await fs.lstat(fullPath)).mtimeMs };
     }));

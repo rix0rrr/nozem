@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as tar from 'tar';
 import { promises as fs } from 'fs';
-import { PROMISE_POOL } from '../util/concurrency';
+import { FILE_PROMISE_POOL } from '../util/files';
 import { OneAtATime } from '../util/one-at-a-time';
 import { hashOf } from '../util/merkle';
 
@@ -29,7 +29,7 @@ export class DirectoryCache implements IArtifactCache {
   }
 
   public queueForStoring(pv: CacheLocator, files: FileSet): Promise<void> {
-    return PROMISE_POOL.queue(async () => {
+    return FILE_PROMISE_POOL.queue(async () => {
       // First write data, then write index (because we do the lookup in reverse order)
       await ensureDirForFile(this.dataFilePath(pv));
       await tar.c({

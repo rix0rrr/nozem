@@ -36,8 +36,6 @@ export class PromisePool {
   }
 }
 
-export const PROMISE_POOL = new PromisePool(4);
-
 interface Queued<A> {
   readonly resolve: (x: A) => void;
   readonly reject: (err: Error) => void;
