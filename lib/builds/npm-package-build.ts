@@ -81,10 +81,15 @@ export abstract class NpmPackageBuild {
     osTools = osTools.add({ node: await OsToolInput.fromExecutable('node') });
 
     // External files
-    const externalFiles = new MerkleTree([
-      ...(pj.nozem?.nonPackageFiles ?? []).map(file => [file, new NonPackageFileInput(dir, file)] as const),
-      ...workspace.absoluteGlobalNonPackageFiles(dir).map(file => [file, new NonPackageFileInput(dir, file)] as const),
-    ]);
+    const externalFileNames = [
+      ...(pj.nozem?.nonPackageFiles ?? []),
+      ...workspace.absoluteGlobalNonPackageFiles(dir),
+      ...await determineAdditionalSourceFiles(pj.nozem?.additionalDirs, dir, workspace.root),
+    ];
+
+    const externalFiles = new MerkleTree(externalFileNames.map(file =>
+      [file, new NonPackageFileInput(dir, file)] as const,
+    ));
 
     const env = NpmPackageBuild.determineEnv(pj.nozem?.env, pj.nozem?.ostools);
 
@@ -493,3 +498,22 @@ function removeHiddenKeys(xs: Record<string, string>): Record<string, string> {
   if (!xs) { return xs; }
   return mkdict(Object.entries(xs).filter(([k, v]) => !k.startsWith('&')));
 }
+
+async function determineAdditionalSourceFiles(additionalDirs: string[] | undefined, rootDir: string, workspaceRoot: string) {
+  const ret = new Array<string>();
+
+  const fileSets = await Promise.all((additionalDirs ?? []).map(async (dir) => {
+    const artifactsPrefix = 'ARTIFACTS:';
+    const files = dir.startsWith(artifactsPrefix)
+      ? await FileSet.fromDirectory(path.join(rootDir, dir.substr(artifactsPrefix.length)))
+      : await FileSet.fromGitignored(path.join(rootDir, dir), workspaceRoot);
+    return files.fileNames.map(fileName => path.relative(rootDir, path.join(files.root, fileName)));
+  }));
+
+  for (const fileSet of fileSets) {
+    ret.push(...fileSet);
+  }
+
+  return ret;
+}
+
