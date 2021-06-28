@@ -73,8 +73,11 @@ export abstract class NpmPackageBuild {
 
     const deps = new MerkleTree(npmDependencyInputs);
 
-    let osTools = new MerkleTree(await Promise.all(
-      (pj.nozem?.ostools ?? []).map(async (name) =>
+    // We only need to look for 'cd' on Mac
+    const applicableToolNames = (pj.nozem?.ostools ?? [])
+      .filter(tool => implies(tool === 'cd', process.platform === 'darwin'));
+
+    let osTools = new MerkleTree(await Promise.all(applicableToolNames.map(async (name) =>
       [name, await OsToolInput.fromExecutable(name)] as const
     )));
     // NPM packages always need node
@@ -517,3 +520,6 @@ async function determineAdditionalSourceFiles(additionalDirs: string[] | undefin
   return ret;
 }
 
+function implies(pred: boolean, consequent: boolean) {
+  return !pred || consequent;
+}

@@ -41,7 +41,7 @@ export class OsToolInput implements IBuildInput {
     // for some versions of Docker to work properly. This used to be disablable by turning off "Cloud Experience"
     // in Docker Desktop 2, but they removed it in 3.
     // let's just go with it.
-    if (this.name === 'docker') {
+    if (this.name === 'docker' && process.platform === 'darwin') {
       for (const alsoInstall of ['com.docker.cli', 'docker-credential-desktop', 'docker-credential-osxkeychain']) {
         try {
           await dir.installExecutable(await OsToolInput.findExecutable(alsoInstall), alsoInstall);
